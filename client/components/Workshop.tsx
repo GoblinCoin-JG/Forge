@@ -9,21 +9,25 @@ import {
   Sparkles,
   Square,
   X,
-  FilePlus2,
   FilePenLine,
   PanelRightClose,
 } from "lucide-react";
 import {
   docText,
   type Chapter,
+  type Project,
   type Proposal,
   type Workshop as WorkshopData,
+  type Workflow,
 } from "../../shared/types";
+import { chapterOutline } from "../../shared/chapter-tree";
+import { lineDiff } from "../../shared/diff";
 import { api, chat } from "../api";
 import { Modal } from "./Modal";
 
 export function Workshop({
   chapter,
+  project,
   chapters,
   configured,
   flush,
@@ -32,6 +36,7 @@ export function Workshop({
   onClose,
 }: {
   chapter: Chapter;
+  project: Project;
   chapters: Chapter[];
   configured: boolean;
   flush: () => Promise<boolean>;
@@ -45,44 +50,51 @@ export function Workshop({
     [stream, setStream] = useState(""),
     [error, setError] = useState(""),
     [review, setReview] = useState<Proposal>(),
+    [reviewTarget, setReviewTarget] = useState<Chapter>(),
+    [proposalParent, setProposalParent] = useState<string | null>(null),
     [reviewing, setReviewing] = useState(false);
   const controller = useRef<AbortController | null>(null),
-    bottom = useRef<HTMLDivElement>(null);
+    bottom = useRef<HTMLDivElement>(null),
+    alive = useRef(true),
+    sending = useRef(false);
+  const load = () => api<WorkshopData>(`/chapters/${chapter.id}/workshop`);
   useEffect(() => {
-    let alive = true;
-    api<WorkshopData>(`/chapters/${chapter.id}/workshop`)
+    alive.current = true;
+    load()
       .then((d) => {
-        if (alive) setData(d);
+        if (alive.current) setData(d);
       })
       .catch((e) => {
-        if (alive) setError(e.message);
+        if (alive.current) setError(e.message);
       });
     return () => {
-      alive = false;
+      alive.current = false;
       controller.current?.abort();
     };
   }, [chapter.id]);
   useEffect(() => {
     bottom.current?.scrollIntoView({ block: "nearest" });
   }, [stream, data?.messages.length]);
-  const send = async () => {
-    if (!prompt.trim() || busy || !data) return;
-    if (!(await flush())) {
-      setError("Save this chapter before discussing it in the Workshop.");
-      return;
-    }
-    const text = prompt;
+  const send = async (text = prompt, workflow?: Workflow) => {
+    if (!text.trim() || sending.current || !data) return;
+    sending.current = true;
     setBusy(true);
     setError("");
-    setStream("");
-    setPrompt("");
-    controller.current = new AbortController();
     try {
+      if (!(await flush()))
+        throw new Error(
+          "Save this chapter before discussing it in the Workshop.",
+        );
+      if (!alive.current) return;
+      setStream("");
+      setPrompt("");
+      controller.current = new AbortController();
       await chat(
         chapter.id,
         text,
         controller.current.signal,
         (event, value) => {
+          if (!alive.current) return;
           if (event === "user")
             setData((d) =>
               d ? { ...d, messages: [...d.messages, value] } : d,
@@ -94,18 +106,43 @@ export function Workshop({
             setStream("");
           }
         },
+        workflow,
       );
     } catch (e) {
-      if ((e as Error).name !== "AbortError") setError((e as Error).message);
-      else setError("Response stopped. Your conversation is saved.");
-      try {
-        setData(await api<WorkshopData>(`/chapters/${chapter.id}/workshop`));
-      } catch {
-        /* Keep the current conversation visible. */
+      if (alive.current) {
+        setError(
+          (e as Error).name === "AbortError"
+            ? "Response stopped. Your conversation is saved."
+            : (e as Error).message,
+        );
+        try {
+          const d = await load();
+          if (alive.current) setData(d);
+        } catch {
+          /* retain conversation */
+        }
       }
     } finally {
-      setBusy(false);
-      setStream("");
+      sending.current = false;
+      if (alive.current) {
+        setBusy(false);
+        setStream("");
+      }
+    }
+  };
+  const openReview = async (proposal: Proposal) => {
+    setError("");
+    try {
+      const latest = proposal.chapterId
+        ? await api<Chapter>(`/chapters/${proposal.chapterId}`)
+        : undefined;
+      if (alive.current) {
+        setReviewTarget(latest);
+        setProposalParent(proposal.parentId);
+        setReview(proposal);
+      }
+    } catch (e) {
+      if (alive.current) setError((e as Error).message);
     }
   };
   const decide = async (decision: "accept" | "reject") => {
@@ -115,20 +152,76 @@ export function Workshop({
     try {
       if (decision === "accept" && !(await flush()))
         throw new Error("Save your current edits before accepting a proposal.");
-      await api(`/proposals/${review.id}/review`, "POST", { decision });
-      setData(await api<WorkshopData>(`/chapters/${chapter.id}/workshop`));
+      await api(`/proposals/${review.id}/review`, "POST", {
+        decision,
+        ...(review.kind === "create_chapter" ||
+        review.kind === "create_subchapter"
+          ? { parentId: proposalParent }
+          : {}),
+      });
+      setData(await load());
       setReview(undefined);
       if (decision === "accept") await onReviewed();
     } catch (e) {
       setError((e as Error).message);
+      if (review.chapterId) {
+        try {
+          setReviewTarget(await api<Chapter>(`/chapters/${review.chapterId}`));
+        } catch {
+          /* retain original review and error */
+        }
+      }
     } finally {
       setReviewing(false);
     }
   };
-  const pending = data?.proposals.filter((p) => p.status === "pending") ?? [];
-  const before = review?.chapterId
+  const localTarget = review?.chapterId
     ? chapters.find((c) => c.id === review.chapterId)
     : undefined;
+  const target =
+    reviewTarget &&
+    reviewTarget.id === review?.chapterId &&
+    (!localTarget || reviewTarget.revision >= localTarget.revision)
+      ? reviewTarget
+      : localTarget;
+  const stale = Boolean(
+    review?.chapterId && (!target || target.revision !== review.baseRevision),
+  );
+  const isCreation =
+    review?.kind === "create_chapter" || review?.kind === "create_subchapter";
+  const before = review?.before;
+  const isRecord =
+    review?.kind === "record_decision" || review?.kind === "record_question";
+  const isStatus = review?.kind === "change_status";
+  const actions: { mode: Workflow; label: string; prompt: string }[] = [
+    {
+      mode: "explore",
+      label: "Explore this chapter",
+      prompt: `Help me develop ${chapter.title} around the player's experience, building on what is documented.`,
+    },
+    {
+      mode: "gaps",
+      label: "Identify missing details",
+      prompt: `Identify the most consequential missing detail in ${chapter.title} and help me resolve it.`,
+    },
+    {
+      mode: "challenge",
+      label: "Challenge this design",
+      prompt: `Challenge ${chapter.title}: identify a concrete weakness or contradiction with our design direction and explain a tradeoff.`,
+    },
+    {
+      mode: "improve",
+      label: "Suggest improvements",
+      prompt: `Suggest a focused improvement to ${chapter.title}, preserving our approved direction.`,
+    },
+    {
+      mode: "organize",
+      label: "Organize these notes",
+      prompt: prompt.trim()
+        ? `Organize these notes into concepts and propose where they belong in the book: ${prompt}`
+        : "Help me organize design notes. Ask me for the notes to work with.",
+    },
+  ];
   return (
     <aside className="workshop">
       <div className="workshop-header">
@@ -147,7 +240,12 @@ export function Workshop({
       <div className="workshop-context">
         <span className="tiny-dot" />
         <span>In context</span>
-        <span className="context-title">{chapter.title}</span>
+        <span
+          className="context-title"
+          title={`${project.title} · ${chapter.title}`}
+        >
+          {project.title} · {chapter.title}
+        </span>
       </div>
       <div className="conversation-scroll">
         {!data?.messages.length && (
@@ -215,23 +313,25 @@ export function Workshop({
             <p>{stream || "Thinking through your design…"}</p>
           </div>
         )}
-        {pending.map((p) => (
-          <button
-            key={p.id}
-            className="proposal-card"
-            onClick={() => setReview(p)}
-          >
-            {p.chapterId ? <FilePenLine size={17} /> : <FilePlus2 size={17} />}
-            <div>
-              <span className="eyebrow">
-                PROPOSED {p.chapterId ? "REVISION" : "CHAPTER"}
-              </span>
-              <strong>{p.title}</strong>
-              <span>Review before applying</span>
-            </div>
-            <ChevronRight size={16} />
-          </button>
-        ))}
+        {data?.proposals
+          .filter((p) => p.status === "pending")
+          .map((p) => (
+            <button
+              key={p.id}
+              className="proposal-card"
+              onClick={() => void openReview(p)}
+            >
+              <FilePenLine size={17} />
+              <div>
+                <span className="eyebrow">
+                  PROPOSED {p.kind.replaceAll("_", " ").toUpperCase()}
+                </span>
+                <strong>{p.title}</strong>
+                <span>{p.description}</span>
+              </div>
+              <ChevronRight size={16} />
+            </button>
+          ))}
         {data?.proposals
           .filter((p) => p.status !== "pending")
           .map((p) => (
@@ -242,6 +342,51 @@ export function Workshop({
               </span>
             </div>
           ))}
+        {!!data?.records.length && (
+          <details className="design-records">
+            <summary>
+              Decisions & open questions ({data.records.length})
+            </summary>
+            {data.records.map((r) => (
+              <div key={r.id} className="design-record">
+                <span className="eyebrow">
+                  {r.kind === "decision"
+                    ? r.supersededBy
+                      ? "SUPERSEDED DECISION"
+                      : "APPROVED DECISION"
+                    : r.status === "resolved"
+                      ? "RESOLVED QUESTION"
+                      : "OPEN QUESTION"}
+                </span>
+                <p>{r.text}</p>
+                <small>{r.rationale}</small>
+                {r.kind === "question" && r.status === "open" && (
+                  <button
+                    className="quiet-button"
+                    onClick={async () => {
+                      try {
+                        const answer = window.prompt(
+                          "What resolves this design question?",
+                        );
+                        if (!answer?.trim()) return;
+                        await api(
+                          `/projects/${project.id}/questions/${r.id}/resolve`,
+                          "POST",
+                          { revision: r.revision, answer },
+                        );
+                        setData(await load());
+                      } catch (e) {
+                        setError((e as Error).message);
+                      }
+                    }}
+                  >
+                    Mark resolved
+                  </button>
+                )}
+              </div>
+            ))}
+          </details>
+        )}
         {error && (
           <div className="inline-error" role="alert">
             {error}
@@ -250,26 +395,20 @@ export function Workshop({
         <div ref={bottom} />
       </div>
       <div className="composer-area">
-        {!data?.messages.length && (
+        <details className="workflow-actions">
+          <summary>Design together</summary>
           <div className="prompt-suggestions">
-            <button
-              disabled={!configured}
-              onClick={() =>
-                setPrompt("Help me explore the core experience of this game.")
-              }
-            >
-              Explore the core idea
-            </button>
-            <button
-              disabled={!configured}
-              onClick={() =>
-                setPrompt("What questions should we answer about this chapter?")
-              }
-            >
-              Find open questions
-            </button>
+            {actions.map((a) => (
+              <button
+                key={a.mode}
+                disabled={!configured || busy || !data}
+                onClick={() => void send(a.prompt, a.mode)}
+              >
+                {a.label}
+              </button>
+            ))}
           </div>
-        )}
+        </details>
         <form
           className={`composer ${!configured ? "disconnected" : ""}`}
           onSubmit={(e) => {
@@ -335,30 +474,99 @@ export function Workshop({
         >
           <div className="proposal-summary">
             <span className="eyebrow">
-              {review.chapterId
-                ? "REPLACE CHAPTER CONTENT"
-                : "ADD A NEW CHAPTER"}
+              {review.kind.replaceAll("_", " ").toUpperCase()}
             </span>
             <h3>{review.title}</h3>
-            <p>{review.reason}</p>
+            <p>{review.description}</p>
+            <p>
+              <strong>Why:</strong> {review.reason}
+            </p>
+            <p className="muted">
+              Target:{" "}
+              {target?.title ??
+                (proposalParent
+                  ? `New sub-chapter under ${chapters.find((c) => c.id === proposalParent)?.title ?? "parent chapter"}`
+                  : "New top-level chapter")}
+              {review.section ? ` · ${review.section}` : ""}
+            </p>
           </div>
-          <div className="proposal-comparison">
-            {before && (
-              <section>
-                <span className="eyebrow">CURRENT · {before.status}</span>
-                <div className="proposal-prose">
-                  {docText(before.content) || "This chapter is blank."}
-                </div>
-              </section>
-            )}
-            <section>
-              <span className="eyebrow">PROPOSED · REQUIRES YOUR APPROVAL</span>
-              <div className="proposal-prose">{docText(review.content)}</div>
-            </section>
-          </div>
+          {isCreation && (
+            <label className="chapter-location">
+              Place under
+              <select
+                aria-label="Proposal parent chapter"
+                disabled={reviewing}
+                value={proposalParent ?? ""}
+                onChange={(e) => setProposalParent(e.target.value || null)}
+              >
+                <option value="">Top-level chapter</option>
+                {chapterOutline(chapters).map((row) => (
+                  <option key={row.chapter.id} value={row.chapter.id}>
+                    {row.number} · {row.chapter.title}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          {stale && (
+            <p className="inline-error" role="alert">
+              This chapter changed after the proposal was generated. Reject it
+              or regenerate and review a fresh proposal.
+            </p>
+          )}
+          {isStatus ? (
+            <p className="proposal-prose">
+              Maturity: {before?.status ?? target?.status} →{" "}
+              {review.proposedStatus}
+            </p>
+          ) : isRecord ? (
+            <div className="proposal-prose">{docText(review.content)}</div>
+          ) : (
+            <>
+              <div className="proposal-comparison">
+                {before && (
+                  <section>
+                    <span className="eyebrow">ORIGINAL · {before.status}</span>
+                    <div className="proposal-prose">
+                      {docText(before.content) || "This chapter is blank."}
+                    </div>
+                  </section>
+                )}
+                <section>
+                  <span className="eyebrow">PROPOSED · REQUIRES APPROVAL</span>
+                  <div className="proposal-prose">
+                    {docText(review.content)}
+                  </div>
+                </section>
+              </div>
+              {before && (
+                <details className="proposal-diff" open>
+                  <summary>Changes · − removed · + added</summary>
+                  {lineDiff(
+                    docText(before.content),
+                    docText(review.content),
+                  ).map((line, i) => (
+                    <div key={i} className={`diff-line ${line.kind}`}>
+                      <span aria-hidden="true">
+                        {line.kind === "added"
+                          ? "+ "
+                          : line.kind === "removed"
+                            ? "− "
+                            : "  "}
+                      </span>
+                      {line.text || " "}
+                    </div>
+                  ))}
+                </details>
+              )}
+            </>
+          )}
           <p className="muted">
-            Accepting saves this {review.chapterId ? "revision" : "new chapter"}{" "}
-            with Proposed maturity. You decide when it becomes Approved.
+            {isRecord
+              ? "Accepting records this decision as Approved or this question as Open. Chapter content stays unchanged."
+              : isStatus
+                ? "Accepting changes only chapter maturity."
+                : "Accepting saves the proposed content with Proposed maturity."}
           </p>
           {error && (
             <p role="alert" className="error-text">
@@ -366,12 +574,27 @@ export function Workshop({
             </p>
           )}
           <div className="modal-actions">
+            {stale && (
+              <button
+                disabled={reviewing || busy}
+                onClick={() => {
+                  const p = review;
+                  setReview(undefined);
+                  void send(
+                    `Regenerate the ${p.kind} proposal "${p.title}" using current chapter content. Intended change: ${p.description}. Previously proposed: ${docText(p.content)}. Produce a fresh proposal for review; do not apply it.`,
+                    "improve",
+                  );
+                }}
+              >
+                Regenerate proposal
+              </button>
+            )}
             <button disabled={reviewing} onClick={() => void decide("reject")}>
               Reject change
             </button>
             <button
               className="primary"
-              disabled={reviewing}
+              disabled={reviewing || stale}
               onClick={() => void decide("accept")}
             >
               {reviewing ? "Saving…" : "Accept change"}

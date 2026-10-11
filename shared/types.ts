@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { KnowledgeSource } from "./knowledge.js";
 
 export const statuses = [
   "Exploring",
@@ -84,6 +85,7 @@ export const chapterInput = z.object({
   title: z.string().trim().min(1).max(120),
   content: docSchema.optional(),
   status: z.enum(statuses).optional(),
+  parentId: z.string().uuid().nullable().optional(),
 });
 export const chapterUpdate = chapterInput
   .partial()
@@ -99,12 +101,40 @@ export interface Project {
 export interface Chapter {
   id: string;
   projectId: string;
+  parentId: string | null;
   title: string;
   content: Doc;
   status: Maturity;
   position: number;
   revision: number;
   updatedAt: string;
+  approvedRevision: number | null;
+  approvedAt: string | null;
+  changedSinceApproval: boolean;
+  archivedAt: string | null;
+}
+export interface ChapterRevision {
+  chapterId: string;
+  projectId: string;
+  revision: number;
+  title: string;
+  content: Doc;
+  status: Maturity;
+  parentId: string | null;
+  createdAt: string;
+  origin:
+    | "migration"
+    | "create"
+    | "manual"
+    | "proposal"
+    | "restore"
+    | "archive"
+    | "reparent"
+    | "unarchive";
+  proposalId: string | null;
+  restoredFrom: number | null;
+  approvedAt: string | null;
+  approvalOrigin: "migration" | "manual" | "proposal" | null;
 }
 export interface Message {
   id: string;
@@ -120,17 +150,63 @@ export interface Proposal {
   messageId: string;
   projectId: string;
   chapterId: string | null;
+  parentId: string | null;
   title: string;
   content: Doc;
   reason: string;
   baseRevision: number | null;
   status: "pending" | "accepted" | "rejected";
   createdAt: string;
+  kind: ProposalKind;
+  description: string;
+  section: string | null;
+  proposedStatus: Maturity | null;
+  relatedChapterIds: string[];
+  before: { title: string; content: Doc; status: Maturity } | null;
+}
+export const proposalKinds = [
+  "create_chapter",
+  "create_subchapter",
+  "update_chapter",
+  "add_section",
+  "revise_section",
+  "change_status",
+  "record_decision",
+  "record_question",
+] as const;
+export type ProposalKind = (typeof proposalKinds)[number];
+export const workflows = [
+  "explore",
+  "gaps",
+  "challenge",
+  "improve",
+  "organize",
+] as const;
+export type Workflow = (typeof workflows)[number];
+export interface DesignRecord {
+  id: string;
+  projectId: string;
+  kind: "decision" | "question";
+  text: string;
+  rationale: string;
+  relatedChapterIds: string[];
+  status: "approved" | "open" | "resolved";
+  createdAt: string;
+  updatedAt: string;
+  revision: number;
+  relatedConceptIds: string[];
+  supersededBy: string | null;
+  resolution: string | null;
+  resolvedAt: string | null;
+  authoritative: boolean;
+  unavailableChapterReferences: { reference: string; reason: string }[];
+  sources: KnowledgeSource[];
 }
 export interface Workshop {
   conversationId: string;
   messages: Message[];
   proposals: Proposal[];
+  records: DesignRecord[];
 }
 export function textDoc(text: string): Doc {
   return {

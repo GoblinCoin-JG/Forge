@@ -28,7 +28,10 @@ import { type Chapter, type Project } from "../shared/types";
 import { api } from "./api";
 import { Modal } from "./components/Modal";
 import { ChapterEditor, type EditorHandle } from "./components/ChapterEditor";
+import { chapterOutline } from "../shared/chapter-tree";
+import { DesignBookNav } from "./components/DesignBookNav";
 import { Workshop } from "./components/Workshop";
+import { ChapterHistory } from "./components/ChapterHistory";
 
 export function App() {
   const [projects, setProjects] = useState<Project[]>([]),
@@ -53,10 +56,15 @@ export function App() {
       | null
     >(null),
     [title, setTitle] = useState(""),
+    [newChapterParent, setNewChapterParent] = useState<string | null>(null),
     [premise, setPremise] = useState(""),
     [search, setSearch] = useState(""),
     [submitting, setSubmitting] = useState(false);
   const editor = useRef<EditorHandle>(null);
+  const [historyChapter, setHistoryChapter] = useState<Chapter>(),
+    [archiveTarget, setArchiveTarget] = useState<Chapter>(),
+    [archivedOpen, setArchivedOpen] = useState(false),
+    [archivedChapters, setArchivedChapters] = useState<Chapter[]>([]);
   const active = chapters.find((c) => c.id === activeId);
   const loadProjects = async () => {
     const p = await api<Project[]>("/projects");
@@ -116,6 +124,7 @@ export function App() {
   const openModal = (name: typeof modal) => {
     setTitle(name === "edit-project" ? project?.title || "" : "");
     setPremise(name === "edit-project" ? project?.premise || "" : "");
+    setNewChapterParent(null);
     setModal(name);
     setError("");
   };
@@ -142,14 +151,18 @@ export function App() {
         const c = await api<Chapter>(
           `/projects/${project.id}/chapters`,
           "POST",
-          { title },
+          { title, parentId: newChapterParent },
         );
         setChapters((cs) => [...cs, c]);
         setActiveId(c.id);
         await loadProjects();
       }
       if (modal === "delete-chapter" && active && project) {
-        await api(`/chapters/${active.id}`, "DELETE");
+        if (!archiveTarget)
+          throw new Error("Reopen the chapter before archiving it.");
+        await api(`/chapters/${archiveTarget.id}`, "DELETE", {
+          revision: archiveTarget.revision,
+        });
         const list = await api<Chapter[]>(`/projects/${project.id}/chapters`);
         setChapters(list);
         setActiveId(list[0]?.id);
@@ -162,15 +175,18 @@ export function App() {
       setSubmitting(false);
     }
   };
-  const reorder = async (index: number, direction: number) => {
-    if (
-      !project ||
-      index + direction < 0 ||
-      index + direction >= chapters.length
-    )
-      return;
-    const ids = chapters.map((c) => c.id);
-    [ids[index], ids[index + direction]] = [ids[index + direction], ids[index]];
+  const reorder = async (id: string, direction: number) => {
+    if (!project) return;
+    const chapter = chapters.find((c) => c.id === id);
+    if (!chapter) return;
+    const siblings = chapters.filter((c) => c.parentId === chapter.parentId);
+    const index = siblings.findIndex((c) => c.id === id),
+      neighbor = siblings[index + direction];
+    if (!neighbor) return;
+    const ids = chapters.map((c) => c.id),
+      from = ids.indexOf(id),
+      to = ids.indexOf(neighbor.id);
+    [ids[from], ids[to]] = [ids[to], ids[from]];
     try {
       setChapters(
         await api<Chapter[]>(`/projects/${project.id}/order`, "PUT", { ids }),
@@ -188,12 +204,42 @@ export function App() {
   const onSaved = (c: Chapter) => {
     setChapters((cs) => cs.map((old) => (old.id === c.id ? c : old)));
   };
+  const showHistory = async (c: Chapter) => {
+    if (!(await flush())) return;
+    try {
+      setHistoryChapter(await api<Chapter>(`/chapters/${c.id}`));
+      setArchivedOpen(false);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+  const showArchive = async () => {
+    if (!project || !(await flush())) return;
+    try {
+      setArchivedChapters(
+        await api<Chapter[]>(`/projects/${project.id}/archived-chapters`),
+      );
+      setArchivedOpen(true);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+  const confirmArchive = async () => {
+    if (!active || !(await flush())) return;
+    try {
+      setArchiveTarget(await api<Chapter>(`/chapters/${active.id}`));
+      openModal("delete-chapter");
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
   const filteredProjects = projects.filter((p) =>
     p.title.toLowerCase().includes(search.toLowerCase()),
   );
   const filteredChapters = chapters.filter((c) =>
     c.title.toLowerCase().includes(search.toLowerCase()),
   );
+  const outline = chapterOutline(chapters);
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -274,91 +320,16 @@ export function App() {
             Projects<span>{projects.length}</span>
           </button>
           <div className="sidebar-projects">
-            <div className="eyebrow sidebar-label">YOUR PROJECTS</div>
-            {projects.map((p) => (
-              <div key={p.id}>
-                <button
-                  className={`project-nav ${p.id === project?.id ? "current" : ""}`}
-                  onClick={() => void openProject(p)}
-                >
-                  {p.id === project?.id ? (
-                    <ChevronDown size={13} />
-                  ) : (
-                    <ChevronRight size={13} />
-                  )}
-                  <span className="project-initial">
-                    {p.title.charAt(0).toUpperCase()}
-                  </span>
-                  <span>{p.title}</span>
-                </button>
-                {p.id === project?.id && (
-                  <>
-                    <div className="book-nav">
-                      <BookOpen size={14} />
-                      <span>Design Book</span>
-                      <button
-                        className="icon-button"
-                        aria-label="Add chapter"
-                        onClick={() => openModal("new-chapter")}
-                      >
-                        <Plus size={14} />
-                      </button>
-                    </div>
-                    <div className="chapter-list">
-                      {chapters.map((c, i) => (
-                        <div
-                          className={`chapter-nav-row ${activeId === c.id ? "selected" : ""}`}
-                          key={c.id}
-                        >
-                          <button
-                            className="chapter-nav"
-                            onClick={() => void openChapter(c.id)}
-                          >
-                            <span className="chapter-number">
-                              {String(i + 1).padStart(2, "0")}
-                            </span>
-                            <span>{c.title}</span>
-                            <span
-                              className={`chapter-status-dot ${c.status === "Approved" ? "green" : ""}`}
-                              title={c.status}
-                            />
-                          </button>
-                          <div className="reorder-controls">
-                            <button
-                              aria-label={`Move ${c.title} up`}
-                              disabled={i === 0}
-                              onClick={() => void reorder(i, -1)}
-                            >
-                              <ArrowUp size={11} />
-                            </button>
-                            <button
-                              aria-label={`Move ${c.title} down`}
-                              disabled={i === chapters.length - 1}
-                              onClick={() => void reorder(i, 1)}
-                            >
-                              <ArrowDown size={11} />
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                    <button
-                      className="add-chapter"
-                      onClick={() => openModal("new-chapter")}
-                    >
-                      <Plus size={13} />
-                      Add chapter
-                    </button>
-                  </>
-                )}
-              </div>
-            ))}
-            {!projects.length && (
-              <p className="sidebar-empty">
-                Your games will find
-                <br />a home here.
-              </p>
-            )}
+            <DesignBookNav
+              projects={projects}
+              projectId={project?.id}
+              chapters={chapters}
+              activeId={activeId}
+              onOpenProject={openProject}
+              onOpenChapter={openChapter}
+              onAddChapter={() => openModal("new-chapter")}
+              onReorder={reorder}
+            />
           </div>
           <div className="sidebar-bottom">
             <span className="tiny-dot green" />
@@ -414,6 +385,12 @@ export function App() {
                 <div className="book-actions">
                   <button
                     className="quiet-button"
+                    onClick={() => void showArchive()}
+                  >
+                    Archived chapters
+                  </button>
+                  <button
+                    className="quiet-button"
                     onClick={() => openModal("edit-project")}
                   >
                     <MoreHorizontal size={18} />
@@ -442,9 +419,15 @@ export function App() {
                           <span>{active.title}</span>
                         </div>
                         <button
+                          className="quiet-button"
+                          onClick={() => void showHistory(active)}
+                        >
+                          History
+                        </button>
+                        <button
                           className="icon-button"
-                          aria-label="Delete chapter"
-                          onClick={() => openModal("delete-chapter")}
+                          aria-label="Archive chapter"
+                          onClick={() => void confirmArchive()}
                         >
                           <Trash2 size={14} />
                         </button>
@@ -453,6 +436,7 @@ export function App() {
                         key={`${active.id}-${editorGeneration}`}
                         ref={editor}
                         chapter={active}
+                        chapters={chapters}
                         onSaved={onSaved}
                         onState={setSaved}
                       />
@@ -478,6 +462,7 @@ export function App() {
                   <Workshop
                     key={active.id}
                     chapter={active}
+                    project={project}
                     chapters={chapters}
                     configured={configured}
                     flush={flush}
@@ -687,7 +672,7 @@ export function App() {
                 : modal === "new-chapter"
                   ? "Add a chapter"
                   : modal === "delete-chapter"
-                    ? "Delete this chapter?"
+                    ? "Archive this chapter?"
                     : modal === "search"
                       ? "Find your place"
                       : "Workshop connection"
@@ -726,6 +711,25 @@ export function App() {
                   required={modal === "new-chapter"}
                 />
               </label>
+              {modal === "new-chapter" && (
+                <label>
+                  Place under
+                  <select
+                    aria-label="New chapter parent"
+                    value={newChapterParent ?? ""}
+                    onChange={(e) =>
+                      setNewChapterParent(e.target.value || null)
+                    }
+                  >
+                    <option value="">Top-level chapter</option>
+                    {outline.map((row) => (
+                      <option key={row.chapter.id} value={row.chapter.id}>
+                        {row.number} · {row.chapter.title}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
               {modal !== "new-chapter" && (
                 <label>
                   The idea
@@ -772,10 +776,19 @@ export function App() {
           {modal === "delete-chapter" && (
             <>
               <p>
-                “{active?.title}” and its Workshop conversation will be
-                permanently deleted from this project.
+                Archive “{archiveTarget?.title}”? It will leave the current
+                Design Book.
               </p>
-              <p className="muted">This cannot be undone.</p>
+              {!!chapters.filter((c) => c.parentId === active?.id).length && (
+                <p className="muted">
+                  Its sub-chapters will be kept and moved up one level.
+                </p>
+              )}
+              <p className="muted">
+                Its saved versions, approvals, and Workshop conversation will be
+                preserved. You can inspect it or return it to the book from
+                Archived chapters.
+              </p>
               {error && <p className="error-text">{error}</p>}
               <div className="modal-actions">
                 <button disabled={submitting} onClick={() => setModal(null)}>
@@ -786,7 +799,7 @@ export function App() {
                   disabled={submitting}
                   onClick={() => void submit()}
                 >
-                  {submitting ? "Deleting…" : "Delete chapter"}
+                  {submitting ? "Archiving…" : "Archive chapter"}
                 </button>
               </div>
             </>
@@ -882,6 +895,35 @@ export function App() {
             </div>
           )}
         </Modal>
+      )}
+      {archivedOpen && (
+        <Modal title="Archived chapters" onClose={() => setArchivedOpen(false)}>
+          <p className="muted">
+            Archived chapters preserve their history and Workshop evidence. They
+            are excluded from the current book and AI chapter context.
+          </p>
+          {!archivedChapters.length && (
+            <p>No archived chapters in this project.</p>
+          )}
+          <div className="archived-chapters">
+            {archivedChapters.map((c) => (
+              <button key={c.id} onClick={() => void showHistory(c)}>
+                {c.title}
+                <span>Inspect history</span>
+              </button>
+            ))}
+          </div>
+        </Modal>
+      )}
+      {historyChapter && (
+        <ChapterHistory
+          chapter={historyChapter}
+          onClose={() => setHistoryChapter(undefined)}
+          onRestored={async (c) => {
+            await refreshAfterReview();
+            setActiveId(c.id);
+          }}
+        />
       )}
     </div>
   );

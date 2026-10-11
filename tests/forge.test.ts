@@ -198,16 +198,18 @@ test("reordering rejects duplicate, incomplete and foreign chapter IDs", () => {
   );
   f.db.close();
 });
-test("deleting a chapter cascades its conversation and proposals", () => {
+test("archiving a chapter retains its conversation and proposals outside the live book", () => {
   const f = fixture();
   propose(f);
   f.store.deleteChapter(f.chapter.id);
   assert.equal(
     f.db.prepare("SELECT count(*) n FROM conversations").get()!.n,
-    0,
+    1,
   );
-  assert.equal(f.db.prepare("SELECT count(*) n FROM messages").get()!.n, 0);
-  assert.equal(f.db.prepare("SELECT count(*) n FROM proposals").get()!.n, 0);
+  assert.equal(f.db.prepare("SELECT count(*) n FROM messages").get()!.n, 1);
+  assert.equal(f.db.prepare("SELECT count(*) n FROM proposals").get()!.n, 1);
+  assert.equal(f.store.chapters(f.project.id).length, 0);
+  assert.ok(f.store.chapter(f.chapter.id, true).archivedAt);
   f.db.close();
 });
 test("API works without AI credentials, validates writes and rejects external origins/hosts", async () => {
@@ -389,10 +391,13 @@ test("partial structured reply decoding handles escaped strings and incomplete u
   assert.equal(partialReply('{"reply":"Done","proposals":['), "Done");
 });
 
-
 test("deletion compacts chapter numbering without changing remaining content", () => {
   const f = fixture();
-  const second = f.store.createChapter(f.project.id, "Gameplay", textDoc("A loop"));
+  const second = f.store.createChapter(
+    f.project.id,
+    "Gameplay",
+    textDoc("A loop"),
+  );
   f.store.deleteChapter(f.chapter.id);
   assert.equal(f.store.chapter(second.id).position, 0);
   assert.equal(docText(f.store.chapter(second.id).content), "A loop");
@@ -402,9 +407,30 @@ test("deletion compacts chapter numbering without changing remaining content", (
 
 test("rich-text validation rejects unsupported nodes, unsafe links and excessive nesting", () => {
   assert.equal(docSchema.safeParse(textDoc("A valid paragraph")).success, true);
-  assert.equal(docSchema.safeParse({type:"doc",content:[{type:"script",text:"invalid"}]}).success, false);
-  assert.equal(docSchema.safeParse({type:"doc",content:[{type:"text",text:"bad link",marks:[{type:"link",attrs:{href:"javascript:alert(1)"}}]}]}).success, false);
-  let child: unknown = {type:"paragraph"};
-  for(let i=0;i<25;i++) child={type:"blockquote",content:[child]};
-  assert.equal(docSchema.safeParse({type:"doc",content:[child]}).success, false);
+  assert.equal(
+    docSchema.safeParse({
+      type: "doc",
+      content: [{ type: "script", text: "invalid" }],
+    }).success,
+    false,
+  );
+  assert.equal(
+    docSchema.safeParse({
+      type: "doc",
+      content: [
+        {
+          type: "text",
+          text: "bad link",
+          marks: [{ type: "link", attrs: { href: "javascript:alert(1)" } }],
+        },
+      ],
+    }).success,
+    false,
+  );
+  let child: unknown = { type: "paragraph" };
+  for (let i = 0; i < 25; i++) child = { type: "blockquote", content: [child] };
+  assert.equal(
+    docSchema.safeParse({ type: "doc", content: [child] }).success,
+    false,
+  );
 });

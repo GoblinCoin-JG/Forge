@@ -1,4 +1,4 @@
-# Goal 1 foundation
+# Forge architecture and AI Workshop
 
 ## Architecture
 
@@ -27,27 +27,45 @@ server/
   app.ts                      Validated REST endpoints and chat stream
   db.ts                       SQLite setup and versioned migration
   store.ts                    Persistent operations and review transactions
-  ai.ts                       Context, provider stream, structured proposals
+  ai.ts                       Provider stream and structured response validation
+  context.ts                  Bounded, project-scoped design context
 shared/types.ts               Data contracts, validation, document utilities
-tests/forge.test.ts           Persistence, approval, and API behavior
+tests/forge.test.ts           Foundation persistence and API behavior
+tests/workshop.test.ts        Design operations, context isolation, conflicts
+shared/diff.ts                Bounded readable proposal diff
 ```
 
 Presentation state (selected project, open panel, search query, editor draft) lives in React. Domain records live in SQLite. The editor debounces saves and serializes requests; revision checks catch conflicting edits. Before navigation, Forge flushes outstanding saves. A failed save preserves the draft, warns on tab closure, and permits retry or explicitly discarding the draft to reload saved content.
 
 ## Data model
 
-| Entity | Relationships and purpose |
-| --- | --- |
-| Projects | UUID, working title, original premise, timestamps |
-| Chapters | Project FK, title, Tiptap JSON content, maturity, position, revision, timestamp |
-| Conversations | Project FK and unique chapter FK; one contextual conversation per chapter |
-| Messages | Conversation FK, role, plain text, complete/failed/interrupted state, timestamp |
-| Proposals | Conversation and assistant-message FKs, project FK, optional target chapter FK, full proposed document, title, reason, captured revision, pending/accepted/rejected status |
-| Migrations | Applied schema version and timestamp |
+| Entity         | Relationships and purpose                                                                                                                                                  |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Projects       | UUID, working title, original premise, timestamps                                                                                                                          |
+| Chapters       | Project FK, title, Tiptap JSON content, maturity, position, revision, timestamp                                                                                            |
+| Conversations  | Project FK and unique chapter FK; one contextual conversation per chapter                                                                                                  |
+| Messages       | Conversation FK, role, plain text, complete/failed/interrupted state, timestamp                                                                                            |
+| Proposals      | Conversation and assistant-message FKs, project FK, optional target chapter FK, full proposed document, title, reason, captured revision, pending/accepted/rejected status |
+| Design records | Project FK, decision/question, rationale, chapter links, approved/open/resolved state                                                                                      |
+| Migrations     | Applied schema version and timestamp                                                                                                                                       |
 
-The Design Book is the ordered collection of a project's chapters. New projects receive only Game Vision. Chapter UUIDs are stable anchors for later cross-references, without a graph database. Chapter deletion cascades its conversation and proposals.
+Chapters have a nullable parent chapter FK. Parent assignments are validated within the project; cycles and self-parenting are rejected. Hierarchical numbering is derived from sibling order. Editing placement uses the same optimistic revision check as chapter text. Archiving a parent promotes its direct children one level while preserving descendant content and conversations.
 
-Proposal acceptance occurs in an immediate SQLite transaction. Revisions use the captured chapter revision, so newer edits produce a conflict and leave the proposal pending. Addition creates a new chapter. Either sets maturity Proposed, separate from the act of accepting an AI edit. Rejection only changes proposal status. Repeated review is rejected. The provider can propose a new chapter or change the active chapter; unrelated targets are rejected before any proposals are saved.
+The Design Book is the ordered collection of a project's live chapters. New projects receive only Game Vision. Chapter UUIDs are stable anchors for later cross-references, without a graph database. Chapter removal archives its row and preserves conversation, proposals, and source evidence. Archived chapters are excluded from current chapter context; explicit decisions retain their authority.
+
+Migration 4 introduces immutable `chapter_revisions` and `chapter_approvals`, an approved-revision pointer, and archival metadata. Existing chapters become labeled migration baselines without rewriting their documents or revision numbers. Every document/maturity/placement save, restore, archive, and return captures a snapshot atomically; reorder changes only positions. Approval is an explicit action tied to a saved revision. Material title/document changes become unreviewed while retaining the earlier approval. Context uses the historical approved snapshot separately from newer drafts. Restoration appends a new unreviewed revision and retains current chapter placement. Historical JSON is rendered directly in a read-only Tiptap preview. See [milestone verification](GOAL_3_MILESTONE_1.md).
+
+Proposal operations are create_chapter, create_subchapter, update_chapter, add_section, revise_section, change_status, record_decision, and record_question. The provider returns validated JSON, never executable instructions. All suggestions share a pending/accepted/rejected lifecycle. Proposed decisions are pending proposals; only accepted decisions become authoritative records. Open questions also require deliberate acceptance. Resolving a question is an explicit project-scoped action.
+
+Generation captures the active chapter before the provider request. All generated proposals are validated and saved together with the completed reply in one transaction; any invalid target, foreign source, malformed section, or invalid status rolls back the entire batch. Each proposal stores the full original snapshot and revision independently of context excerpts. Backend validation binds target, source assistant message, conversation, and project, and checks every related chapter belongs to that project. Chapter modifications are restricted to the conversation's active chapter; creation stays within its project.
+
+Acceptance occurs in an immediate SQLite transaction. A captured revision mismatch returns 409 and leaves the proposal pending and newer content intact. The UI disables stale acceptance and offers regeneration for a new review. Content changes receive Proposed maturity; status changes preserve title/content, and record proposals preserve all chapter data. Rejection only changes proposal state. Repeated review is rejected. Section revisions require one exact heading and replace its body through the next heading of equal or higher level; other nodes retain their rich-text JSON.
+
+Migration 3 adds chapter/proposal parent relationships, preserving existing books as top-level chapters. A sub-chapter proposal is constrained to the active chapter as its parent. Acceptance only creates a child and never overwrites the parent, so multiple split proposals remain independently applicable. The human can choose another in-project destination during review, including for legacy standalone proposals.
+
+Migration 2 adds operation metadata, original snapshots, chapter links, and design records without resetting existing data. Legacy proposal kinds are inferred from their target. Matching legacy revisions recover their original snapshot; already-stale legacy proposals remain blocked.
+
+The centralized context builder reserves up to 32,000 characters for design excerpts and up to 8,000 for completed conversation text. It prioritizes the selected chapter and Game Vision, then up to four Approved chapters and three relevant drafts ranked by keyword overlap, with ancestors prioritized when discussing a sub-chapter. Context also identifies the active chapter’s parent path and existing children. It includes up to twelve relevant approved decisions/open questions and five pending proposal summaries. It labels maturity and truncation explicitly. Full chapter replacements are refused when the active chapter was excerpted, preventing accidental loss of omitted material. Full snapshots are used only for validation and review, never copied wholesale into the provider context.
 
 ## Implemented increments
 
@@ -58,10 +76,22 @@ Proposal acceptance occurs in an immediate SQLite transaction. Revisions use the
 
 These are deliberately separate modules and verifiable increments, rather than infrastructure for future Forge subsystems. There are no Unity changes, coding agents, backlogs, assets, release workflows, cloud accounts, or collaboration.
 
+## Goal 3 structured knowledge persistence
+
+Migration 5 extends existing `design_records` and adds project-owned concepts, typed relationships, normalized concept/chapter and record associations, immutable change snapshots, and verified provenance. Concepts exist independently of chapters. A focused `Store.knowledge` domain module shares SQLite and the existing transaction boundary; `/api/projects/:projectId/knowledge` and scoped entity/lifecycle endpoints expose the model without adding a knowledge UI or AI extraction workflow.
+
+Exploring concepts/relationships are unreviewed; approval is explicit and material changes require renewed review. Symmetric relationships are canonicalized and active duplicates rejected; directed edges retain their direction. Concept archival atomically retires its incident edges. Decision statements are immutable and replaced through atomic supersession; questions retain answers and reopen history. Associations never synchronize chapter prose. Legacy record JSON is retained as evidence; normalized tables serve current associations, and unknown/missing legacy evidence is disclosed. Current AI context excludes superseded decisions. See [Milestone 2 report and API inventory](GOAL_3_MILESTONE_2.md).
+
+## Goal 2 implementation
+
+1. Reused the existing SQLite store, chapter revision checks, SSE adapter, editor flush, and chapter conversations.
+2. Added centralized context selection, typed proposal operations, source/target validation, original snapshots, and atomic generation/review.
+3. Added persistent design records, question resolution, contextual workflow modes, snapshot comparisons, readable diffs, stale blocking/regeneration, and project/chapter indicators.
+4. Verified deterministic API and persistence tests, production compilation, and the browser conversation-to-approved-document workflow.
+
 ## Current limits
 
-- No live OpenAI call was verified in this environment because credentials are not configured. The provider adapter and review workflow are tested with deterministic responses.
-- Context currently includes complete documents, with recent conversation history capped at 30 messages. Very large books can exceed the selected model's context; token-aware context selection is a future refinement.
-- AI revisions use plain paragraphs and replace the full document. Manual rich-text formatting is supported; AI proposals do not retain it.
-- A hard browser/process crash before an autosave completes can lose the unsaved draft. Completed saves persist; normal navigation flushes and tab closure warns about pending changes.
-- This release is a single-user local application. Concurrent browser edits are detected, not collaboratively merged.
+- Goal 2 verification uses a deterministic assistant and does not make a live provider call. Provider quality still depends on the configured model.
+- Context uses character budgets and keyword overlap, not a tokenizer or semantic retrieval. Older conversations remain persisted but only recent completed messages are sent. There is no automatic conversation summarization or contradiction classifier; significant unresolved tensions can be proposed as open questions.
+- AI text supports headings, bold emphasis, simple lists, and fenced code through a shared text-to-editor converter. It is not a full Markdown engine. Legacy unmarked paragraphs are normalized on editor load and autosaved with optimistic concurrency; existing rich nodes and code blocks are preserved. Section operations preserve unrelated rich text; full replacement recreates only the proposed formatting. Excerpted chapters support section operations instead of full replacement.
+- This remains a single-user local application. Concurrent browser edits are detected and rejected rather than merged. A hard crash before an autosave completes can lose unsaved draft text.

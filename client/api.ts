@@ -19,11 +19,12 @@ export async function chat(
   content: string,
   signal: AbortSignal,
   onEvent: (event: string, data: any) => void,
+  workflow?: import("../shared/types").Workflow,
 ) {
   const response = await fetch(`/api/chapters/${chapterId}/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ content }),
+    body: JSON.stringify({ content, workflow }),
     signal,
   });
   if (!response.ok) {
