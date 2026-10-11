@@ -1,10 +1,12 @@
-import { loadEnvFile } from "node:process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { parseEnv } from "node:util";
 import { openDatabase } from "./db.js";
 import { Store } from "./store.js";
 import { createApp } from "./app.js";
 
-if (existsSync(".env")) loadEnvFile(".env");
+// Explicit local settings take precedence over inherited shell settings.
+if (existsSync(".env"))
+  Object.assign(process.env, parseEnv(readFileSync(".env", "utf8")));
 const db = openDatabase(process.env.FORGE_DB_PATH || "./data/forge.sqlite");
 const app = createApp(new Store(db));
 app.addHook("onClose", async () => db.close());

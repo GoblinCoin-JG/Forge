@@ -38,7 +38,7 @@ Manual editing works without any API key. To connect the Workshop:
 cp .env.example .env
 ```
 
-Set `OPENAI_API_KEY` in `.env`, restart Forge, and reload the browser. Alternatively, set it in the backend process environment. Keys stay on the backend and are never returned to the browser, saved in SQLite, or committed to Git. The optional `OPENAI_MODEL` defaults to `gpt-4.1-mini` and must support streaming chat completions and strict structured outputs. Requests need outbound access to `api.openai.com` and incur your provider's normal API usage costs.
+Set `OPENAI_API_KEY` in `.env`, restart Forge, and reload the browser. Settings in `.env` take precedence over inherited shell settings. Alternatively, set it in the backend process environment. Keys stay on the backend and are never returned to the browser, saved in SQLite, or committed to Git. The optional `OPENAI_MODEL` defaults to `gpt-4.1-mini` and must support streaming chat completions and strict structured outputs. Requests need outbound access to `api.openai.com` and incur your provider's normal API usage costs.
 
 The Workshop supplies project details, the active chapter, other Approved chapters, and up to 30 completed messages from the active chapter's conversation. Conversations and proposals persist locally. The assistant may propose a full chapter revision or an additional chapter. **Reviewing or receiving a proposal never changes the book.** Acceptance applies the proposal transactionally and marks chapter maturity Proposed; the director can subsequently mark it Approved. Rejection does not modify chapter data. Proposals based on an older chapter revision cannot overwrite newer manual edits.
 
