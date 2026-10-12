@@ -10,6 +10,8 @@ import { buildContext } from "../server/context.js";
 import { answerSchema, type Answer } from "../server/ai.js";
 import { docText, textDoc, type Doc } from "../shared/types.js";
 import { lineDiff } from "../shared/diff.js";
+import { canonicalOffer } from "./fixtures/document-offer.js";
+import { documentExcerpt } from "../shared/document-context.js";
 function setup(path = ":memory:") {
   const db = openDatabase(path),
     store = new Store(db),
@@ -19,7 +21,9 @@ function setup(path = ":memory:") {
 }
 function offer(
   f: ReturnType<typeof setup>,
-  change: Partial<Exclude<Answer["proposals"][number], { kind: "knowledge" }>>,
+  change: Partial<
+    Exclude<Answer["proposals"][number], { kind: "knowledge" | "document" }>
+  >,
 ) {
   const w = f.store.workshop(f.chapter.id),
     m = f.store.addMessage(
@@ -32,16 +36,17 @@ function offer(
     w.conversationId,
     m.id,
     f.project.id,
-    {
+    canonicalOffer({
       kind: "update_chapter",
       chapterId: current.id,
       title: current.title,
       content: "New direction",
       reason: "Focus the experience",
       ...change,
-    },
+    }),
     change.chapterId === null ? null : current.revision,
     current,
+    documentExcerpt(current.content, 500000).receipt,
   );
 }
 const heading = (text: string) => ({
@@ -114,7 +119,7 @@ test("section approval preserves unrelated rich text; rejects ambiguous and miss
     });
     assert.throws(
       () => offer(f, { kind: "revise_section", section: "Loop" }),
-      /one existing heading/,
+      /unique existing heading/,
     );
   } finally {
     f.db.close();
@@ -228,7 +233,7 @@ test("proposal sources, targets, revisions and related chapters are validated ag
     assert.throws(() => offer(f, { kind: "revise_section" }), /heading/);
     assert.throws(
       () => offer(f, { proposedStatus: "Approved" }),
-      /Only status/,
+      /proposedStatus|Only status/,
     );
     const w = f.store.workshop(f.chapter.id),
       m = f.store.addMessage(fw.conversationId, "assistant", "Foreign source");
@@ -238,12 +243,12 @@ test("proposal sources, targets, revisions and related chapters are validated ag
           w.conversationId,
           m.id,
           f.project.id,
-          {
+          canonicalOffer({
             chapterId: f.chapter.id,
             title: "Vision",
             content: "Bad",
             reason: "Bad",
-          },
+          }),
           0,
         ),
       /source/,
@@ -396,12 +401,12 @@ test("changes during AI generation retain the original snapshot and fail approva
       return {
         reply: "A proposal",
         proposals: [
-          {
+          canonicalOffer({
             chapterId: f.chapter.id,
             title: "Vision",
             content: "Old idea expanded",
             reason: "Expansion",
-          },
+          }),
         ],
       };
     },
@@ -569,7 +574,27 @@ test("migration upgrades legacy proposals without resetting content or conversat
   const path = join(dir, "book.sqlite");
   let f = setup(path);
   try {
-    const current = offer(f, { content: "Reviewed later" });
+    const current = (() => {
+      const w = f.store.workshop(f.chapter.id),
+        m = f.store.addMessage(
+          w.conversationId,
+          "assistant",
+          "Legacy revision",
+        );
+      return f.store.addProposal(
+        w.conversationId,
+        m.id,
+        f.project.id,
+        {
+          chapterId: f.chapter.id,
+          title: "Game Vision",
+          content: "Reviewed later",
+          reason: "Original legacy contract",
+        },
+        0,
+        f.chapter,
+      );
+    })();
     const w = f.store.workshop(f.chapter.id);
     const m = f.store.addMessage(
       w.conversationId,
@@ -589,6 +614,7 @@ test("migration upgrades legacy proposals without resetting content or conversat
       null,
     );
     // Reconstruct the shipped v1 table shape and migration marker.
+    f.db.exec("DROP TRIGGER canonical_proposal_content_immutable");
     for (const name of [
       "kind",
       "description",
@@ -615,11 +641,13 @@ test("migration upgrades legacy proposals without resetting content or conversat
       upgraded.proposals.find((p) => p.id === current.id)!.before!.content,
       f.chapter.content,
     );
-    store.reviewProposal(current.id, "accept");
-    assert.equal(
-      docText(store.chapter(f.chapter.id).content),
-      "Reviewed later",
+    assert.throws(
+      () => store.reviewProposal(current.id, "accept"),
+      /Legacy full replacement/,
     );
+    assert.deepEqual(store.chapter(f.chapter.id).content, f.chapter.content);
+    store.reviewProposal(addition.id, "accept");
+    assert.equal(store.chapters(f.project.id).length, 2);
   } finally {
     f.db.close();
     rmSync(dir, { recursive: true });

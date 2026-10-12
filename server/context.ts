@@ -1,12 +1,12 @@
 import {
   docText,
-  textDoc,
   type Chapter,
   type Message,
   type Workflow,
 } from "../shared/types.js";
 import type { AIContext } from "./ai.js";
 import type { Store } from "./store.js";
+import { documentExcerpt } from "../shared/document-context.js";
 
 // Character budgets keep requests bounded independently of book/history size.
 // Excerpts retain maturity labels; full revision snapshots never come from excerpts.
@@ -28,12 +28,21 @@ export function buildContext(
     if (text.length > n) truncated = true;
     return text.slice(0, n);
   };
-  const excerpt = (c: Chapter, limit: number) => ({
-    ...c,
-    content: textDoc(clip(docText(c.content), limit)),
-  });
+  const excerpt = (c: Chapter, limit: number) => {
+    const view = documentExcerpt(c.content, Math.min(limit, remaining));
+    remaining -= JSON.stringify(view.document).length;
+    if (!view.receipt.complete) truncated = true;
+    return { ...c, content: view.document };
+  };
   const projectContext = { ...project, premise: clip(project.premise, 4000) };
-  const activeContext = excerpt(active, 10000);
+  const activeView = documentExcerpt(
+    active.content,
+    Math.min(10000, remaining),
+    messages.at(-1)?.content ?? "",
+  );
+  const activeContext = { ...active, content: activeView.document };
+  remaining -= JSON.stringify(activeView.document).length;
+  if (!activeView.receipt.complete) truncated = true;
   const vision = all.find(
     (c) => c.title.toLowerCase() === "game vision" && c.id !== active.id,
   );
@@ -187,6 +196,7 @@ export function buildContext(
   )
     truncated = true;
   return {
+    documentReceipt: activeView.receipt,
     knowledge: {
       projectId: project.id,
       concepts,
@@ -214,7 +224,7 @@ export function buildContext(
       })),
     messages: recent,
     workflow,
-    activeTruncated: docText(active.content).length > 10000,
+    activeTruncated: !activeView.receipt.complete,
     truncated,
   };
 }

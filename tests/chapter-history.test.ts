@@ -1,4 +1,5 @@
 import { test } from "node:test";
+import { canonicalOffer } from "./fixtures/document-offer.js";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -219,13 +220,13 @@ test("proposal acceptance and restoration record source evidence and stale propo
     assistant: async (ctx) => ({
       reply: "Review this",
       proposals: [
-        {
+        canonicalOffer({
           kind: "update_chapter",
           chapterId: ctx.active.id,
           title: "Game Vision",
           content: "## Loop\n\n**Explore** and return.",
           reason: "Clarify the loop",
-        },
+        }),
       ],
     }),
   });

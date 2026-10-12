@@ -9,6 +9,11 @@ import { textDoc } from "../shared/types.js";
 import type { Root } from "react-dom/client";
 import { answerSchema, type DesignAssistant } from "../server/ai.js";
 import type { KnowledgePayload } from "../shared/knowledge-proposals.js";
+import {
+  richDesignDocument,
+  movementRefinement,
+} from "./fixtures/rich-document.js";
+import { materializeDocument } from "../shared/document-proposals.js";
 
 async function uiFixture(fullApp = false, assistant?: DesignAssistant) {
   const dom = new JSDOM(
@@ -801,6 +806,358 @@ test("knowledge proposal preview preserves original content and blocks stale app
       f.store.knowledge.concept(f.project.id, c.id).description,
       "Newer saved description",
     );
+  } finally {
+    await f.close();
+  }
+});
+
+test("conversation-to-rich-review-to-acceptance preserves unrelated document nodes and original approved history", async () => {
+  const f = await uiFixture(true, async (ctx) =>
+    answerSchema.parse({
+      reply: "Review a localized rich Movement revision.",
+      proposals: [
+        {
+          kind: "document",
+          chapterId: ctx.active.id,
+          parentId: null,
+          title: "Movement refinement",
+          description: "Preserve the other sections",
+          reason: "Readable controls",
+          document: {
+            version: 2,
+            action: "revise_section",
+            heading: "Movement",
+            body: movementRefinement(),
+          },
+        },
+      ],
+    }),
+  );
+  try {
+    f.chapter = f.store.updateChapter(f.chapter.id, {
+      revision: 0,
+      content: richDesignDocument,
+    });
+    f.chapter = f.store.approveChapter(f.chapter.id, f.chapter.revision);
+    await f.click(/^UUI fixture$/);
+    await f.wait(() =>
+      Boolean(
+        f.dom.window.document.querySelector('[aria-label="Chapter content"]'),
+      ),
+    );
+    await f.fill(
+      "Message the AI Workshop",
+      "Rewrite Movement only, preserving links and other sections.",
+    );
+    await f.click("Send message");
+    await f.wait(() => f.text().includes("Movement refinement"));
+    await f.click(/PROPOSED REVISE SECTIONMovement refinement/);
+    await f.wait(
+      () =>
+        f.scope().querySelectorAll(".history-document .tiptap").length === 2,
+    );
+    const previews = f.scope().querySelectorAll(".history-document .tiptap");
+    assert.ok(
+      previews[0].querySelector('a[href="https://example.com/movement-old"]'),
+    );
+    assert.ok(
+      previews[1].querySelector('a[href="https://example.com/movement-new"]'),
+    );
+    assert.ok(previews[0].querySelector('ol[start="3"] ul'));
+    assert.ok(previews[1].querySelector("pre code"));
+    assert.ok(previews[1].querySelector("blockquote"));
+    assert.ok(f.scope().textContent?.includes("link destination"));
+    assert.ok(f.scope().textContent?.includes("numbering starts at"));
+    assert.deepEqual(f.store.chapter(f.chapter.id).content, richDesignDocument);
+    await f.click("Accept change");
+    await f.wait(() => !f.dom.window.document.querySelector("dialog[open]"));
+    const expected = materializeDocument(richDesignDocument, {
+      version: 2,
+      action: "revise_section",
+      heading: "Movement",
+      body: movementRefinement(),
+    });
+    assert.deepEqual(f.store.chapter(f.chapter.id).content, expected);
+    assert.deepEqual(
+      f.store.approvedChapter(f.chapter.id)!.content,
+      richDesignDocument,
+    );
+    const version = f.store.chapter(f.chapter.id).revision;
+    await f.flush();
+    await f.flush();
+    assert.equal(f.store.chapter(f.chapter.id).revision, version);
+    assert.ok(
+      f.dom.window.document.querySelector(
+        '[aria-label="Chapter content"] a[href="https://example.com/movement-new"]',
+      ),
+    );
+  } finally {
+    await f.close();
+  }
+});
+
+test("legacy full document review shows rich evidence and regeneration while safe stored chapter creation stays reviewable", async () => {
+  const f = await uiFixture(true, async () => ({
+    reply: "Ready",
+    proposals: [],
+  }));
+  try {
+    f.chapter = f.store.updateChapter(f.chapter.id, {
+      revision: 0,
+      content: richDesignDocument,
+    });
+    const w = f.store.workshop(f.chapter.id),
+      m = f.store.addMessage(w.conversationId, "assistant", "Older proposals");
+    f.store.addProposal(
+      w.conversationId,
+      m.id,
+      f.project.id,
+      {
+        kind: "update_chapter",
+        chapterId: f.chapter.id,
+        title: "Legacy flat rewrite",
+        content: "Would lose rich information",
+        reason: "Legacy format",
+      },
+      f.chapter.revision,
+      f.chapter,
+    );
+    f.store.addProposal(
+      w.conversationId,
+      m.id,
+      f.project.id,
+      {
+        kind: "create_chapter",
+        chapterId: null,
+        title: "Legacy world",
+        content: "## World\n\n**Discover** new routes.",
+        reason: "Preserve stored content",
+      },
+      null,
+    );
+    await f.click(/^UUI fixture$/);
+    await f.wait(() => f.text().includes("Legacy flat rewrite"));
+    await f.click(/PROPOSED UPDATE CHAPTERLegacy flat rewrite/);
+    await f.wait(
+      () => f.scope().textContent?.includes("Legacy full replacement") === true,
+    );
+    const accept = Array.from(
+      f.scope().querySelectorAll<HTMLButtonElement>("button"),
+    ).find((b) => b.textContent === "Accept change")!;
+    assert.equal(accept.disabled, true);
+    assert.ok(f.scope().textContent?.includes("Regenerate proposal"));
+    assert.ok(
+      f.scope().querySelector('a[href="https://example.com/movement-old"]'),
+    );
+    await f.click("Reject change");
+    await f.wait(() => !f.dom.window.document.querySelector("dialog[open]"));
+    await f.click(/PROPOSED CREATE CHAPTERLegacy world/);
+    await f.wait(() => Boolean(f.scope().querySelector("h2")));
+    assert.ok(f.scope().textContent?.includes("no conversion will run"));
+    assert.ok(f.scope().querySelector("strong"));
+    await f.click("Accept change");
+    await f.wait(() => f.store.chapters(f.project.id).length === 2);
+    assert.deepEqual(f.store.chapter(f.chapter.id).content, richDesignDocument);
+  } finally {
+    await f.close();
+  }
+});
+
+test("stale document regeneration preserves the requested section and captures the latest canonical source", async () => {
+  let regenerated = false;
+  const f = await uiFixture(true, async (ctx) => {
+    assert.ok(
+      ctx.messages.at(-1)!.content.includes("Affected section: Movement"),
+    );
+    assert.ok(
+      ctx.messages.at(-1)!.content.includes("localized section operation"),
+    );
+    assert.equal(ctx.active.title, "Newer title");
+    regenerated = true;
+    return answerSchema.parse({
+      reply: "Review a fresh localized revision",
+      proposals: [
+        {
+          kind: "document",
+          chapterId: ctx.active.id,
+          title: "Fresh movement revision",
+          description: "Movement only",
+          reason: "Latest source",
+          document: {
+            version: 2,
+            action: "revise_section",
+            heading: "Movement",
+            body: movementRefinement(),
+          },
+        },
+      ],
+    });
+  });
+  try {
+    f.chapter = f.store.updateChapter(f.chapter.id, {
+      revision: 0,
+      content: richDesignDocument,
+    });
+    const w = f.store.workshop(f.chapter.id),
+      m = f.store.addMessage(
+        w.conversationId,
+        "assistant",
+        "An older movement proposal",
+      );
+    f.store.addProposal(
+      w.conversationId,
+      m.id,
+      f.project.id,
+      {
+        kind: "document",
+        chapterId: f.chapter.id,
+        title: "Old movement revision",
+        description: "Movement only",
+        reason: "Focus",
+        document: {
+          version: 2,
+          action: "revise_section",
+          heading: "Movement",
+          body: movementRefinement(),
+        },
+        content: "",
+      },
+      f.chapter.revision,
+      f.chapter,
+      {
+        complete: true,
+        includedBlockIndexes: f.chapter.content.content!.map((_, i) => i),
+        completeSections: ["Movement"],
+      },
+      f.chapter,
+    );
+    const latest = f.store.updateChapter(f.chapter.id, {
+      revision: f.chapter.revision,
+      title: "Newer title",
+    });
+    await f.click(/^UUI fixture$/);
+    await f.wait(() => f.text().includes("Old movement revision"));
+    await f.click(/PROPOSED REVISE SECTIONOld movement revision/);
+    await f.wait(
+      () => f.scope().textContent?.includes("This chapter changed") === true,
+    );
+    await f.click("Regenerate proposal");
+    await f.wait(() => f.text().includes("Fresh movement revision"));
+    assert.ok(regenerated);
+    const p = f.store
+      .workshop(f.chapter.id)
+      .proposals.find((p) => p.title === "Fresh movement revision")!;
+    assert.equal(p.baseRevision, latest.revision);
+    assert.equal(p.document!.sourceRevision, latest.revision);
+    assert.equal(p.kind, "revise_section");
+    assert.deepEqual(f.store.chapter(f.chapter.id).content, richDesignDocument);
+  } finally {
+    await f.close();
+  }
+});
+
+test("unsupported legacy document previews remain inspectable and cannot crash or silently discard their source", async () => {
+  const f = await uiFixture(true, async () => ({
+    reply: "Ready",
+    proposals: [],
+  }));
+  try {
+    const w = f.store.workshop(f.chapter.id),
+      m = f.store.addMessage(
+        w.conversationId,
+        "assistant",
+        "Legacy unsupported representation",
+      ),
+      p = f.store.addProposal(
+        w.conversationId,
+        m.id,
+        f.project.id,
+        {
+          kind: "create_chapter",
+          chapterId: null,
+          title: "Unsupported legacy",
+          content: "Stored evidence",
+          reason: "Review safely",
+        },
+        null,
+      );
+    const unsupported = {
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          content: [
+            {
+              type: "heading",
+              attrs: { level: 2 },
+              content: [{ type: "text", text: "Invalid nesting retained" }],
+            },
+          ],
+        },
+      ],
+    };
+    f.db
+      .prepare("UPDATE proposals SET content=? WHERE id=?")
+      .run(JSON.stringify(unsupported), p.id);
+    await f.click(/^UUI fixture$/);
+    await f.wait(() => f.text().includes("Unsupported legacy"));
+    await f.click(/PROPOSED CREATE CHAPTERUnsupported legacy/);
+    await f.wait(
+      () =>
+        f.scope().textContent?.includes("cannot be rendered faithfully") ===
+        true,
+    );
+    await f.click("Inspect original stored representation");
+    assert.ok(
+      f
+        .scope()
+        .querySelector("pre")
+        ?.textContent?.includes("Invalid nesting retained"),
+    );
+    assert.equal(
+      Array.from(f.scope().querySelectorAll<HTMLButtonElement>("button")).find(
+        (b) => b.textContent === "Accept change",
+      )!.disabled,
+      true,
+    );
+    await f.click("Reject change");
+    await f.wait(() => !f.dom.window.document.querySelector("dialog[open]"));
+    assert.deepEqual(
+      f.store.workshop(f.chapter.id).proposals[0].content,
+      unsupported,
+    );
+  } finally {
+    await f.close();
+  }
+});
+
+test("unsupported saved chapters retain their representation without implicit editor normalization or autosaving", async () => {
+  const f = await uiFixture(true);
+  try {
+    const original = {
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          attrs: { unknownLegacyAttribute: "retain this evidence" },
+          content: [{ type: "text", text: "Original saved knowledge" }],
+        },
+      ],
+    };
+    f.db
+      .prepare("UPDATE chapters SET content=? WHERE id=?")
+      .run(JSON.stringify(original), f.chapter.id);
+    await f.click(/^UUI fixture$/);
+    await f.wait(() => f.text().includes("cannot be edited faithfully"));
+    assert.ok(f.text().includes("Restore a supported version"));
+    assert.equal(
+      f.dom.window.document.querySelector('[aria-label="Chapter content"]'),
+      null,
+    );
+    await f.flush();
+    await f.flush();
+    assert.deepEqual(f.store.chapter(f.chapter.id).content, original);
+    assert.equal(f.store.chapter(f.chapter.id).revision, 0);
   } finally {
     await f.close();
   }

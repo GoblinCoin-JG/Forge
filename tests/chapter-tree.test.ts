@@ -1,4 +1,5 @@
 import { test } from "node:test";
+import { canonicalOffer } from "./fixtures/document-offer.js";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -346,14 +347,14 @@ test("streamed split proposals carry their parent through generation and approva
     assistant: async (ctx) => ({
       reply: "Review this sub-chapter",
       proposals: [
-        {
+        canonicalOffer({
           kind: "create_subchapter",
           parentId: ctx.active.id,
           chapterId: null,
           title: "Failure",
           content: "Return after failed missions.",
           reason: "Develop failure stakes.",
-        },
+        }),
       ],
     }),
   });

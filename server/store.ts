@@ -1,6 +1,12 @@
 import { isDescendant } from "../shared/chapter-tree.js";
 import { designTextDoc } from "../shared/design-text.js";
-import { changeSchema, type Answer } from "./ai.js";
+import { changeSchema, documentChangeSchema, type Answer } from "./ai.js";
+import {
+  materializeDocument,
+  documentProposalSafety,
+  type DocumentProposalData,
+  type DocumentReceipt,
+} from "../shared/document-proposals.js";
 import { randomUUID } from "node:crypto";
 import { sameChapterContent } from "../shared/chapter-content.js";
 import { KnowledgeStore } from "./knowledge-store.js";
@@ -64,6 +70,7 @@ const message = (r: Row): Message => ({
   createdAt: r.created_at,
 });
 const proposal = (r: Row): Proposal => ({
+  document: r.document_payload ? JSON.parse(r.document_payload) : null,
   knowledge: r.knowledge_payload ? JSON.parse(r.knowledge_payload) : null,
   appliedResult: r.applied_result ? JSON.parse(r.applied_result) : null,
   id: r.id,
@@ -534,8 +541,19 @@ export class Store {
     input: Answer["proposals"][number],
     baseRevision: number | null,
     snapshot?: Chapter,
+    receipt?: DocumentReceipt,
+    sourceSnapshot?: Chapter,
   ) {
-    const change = changeSchema.parse(input);
+    const canonical =
+      input.kind === "document" ? documentChangeSchema.parse(input) : null;
+    const change = canonical
+      ? {
+          ...canonical,
+          kind: canonical.document.action,
+          section:
+            "heading" in canonical.document ? canonical.document.heading : null,
+        }
+      : changeSchema.parse(input);
     const conversation = this.db
       .prepare("SELECT * FROM conversations WHERE id=?")
       .get(conversationId) as Row | undefined;
@@ -555,6 +573,55 @@ export class Store {
         "Proposal source belongs to another conversation or project",
       );
     this.chapter(conversation.chapter_id);
+    let document: DocumentProposalData | null = null;
+    if (canonical) {
+      const capturedSource = sourceSnapshot ?? snapshot;
+      if (
+        !capturedSource ||
+        capturedSource.id !== conversation.chapter_id ||
+        capturedSource.projectId !== projectId ||
+        !receipt
+      )
+        throw new AppError(
+          400,
+          "A canonical proposal requires captured source and context coverage.",
+        );
+      const saved = this.history(capturedSource.id).find(
+        (h) => h.revision === capturedSource.revision,
+      );
+      if (!saved || !sameChapterContent(saved, capturedSource))
+        throw new AppError(
+          400,
+          "Canonical source must match an exact saved revision.",
+        );
+      if (canonical.document.action === "update_chapter" && !receipt.complete)
+        throw new AppError(
+          400,
+          "Full replacement requires the complete original rich document. Request a section edit.",
+        );
+      if (
+        canonical.document.action === "revise_section" &&
+        !receipt.complete &&
+        !receipt.completeSections.includes(canonical.document.heading)
+      )
+        throw new AppError(
+          400,
+          "The entire target section was not supplied to the AI. Request a narrower edit.",
+        );
+      if (
+        receipt.complete &&
+        (receipt.includedBlockIndexes.length !==
+          (capturedSource.content.content ?? []).length ||
+          receipt.includedBlockIndexes.some((index, i) => index !== i))
+      )
+        throw new AppError(400, "Invalid complete-document coverage receipt.");
+      document = {
+        payload: canonical.document,
+        sourceChapterId: capturedSource.id,
+        sourceRevision: capturedSource.revision,
+        receipt,
+      };
+    }
     const kind =
       change.kind ?? (change.chapterId ? "update_chapter" : "create_chapter");
     const target = change.chapterId ? this.chapter(change.chapterId) : null;
@@ -602,10 +669,17 @@ export class Store {
       throw new AppError(400, "A status proposal requires a maturity");
     if (kind !== "change_status" && change.proposedStatus)
       throw new AppError(400, "Only status proposals may change maturity");
-    if (kind !== "change_status" && !change.content.trim())
+    if (!canonical && kind !== "change_status" && !change.content.trim())
       throw new AppError(400, "A proposal requires content");
-    let content = designTextDoc(change.content);
-    if (kind === "add_section" || kind === "revise_section") {
+    let content = canonical
+      ? materializeDocument(
+          target ? before!.content : undefined,
+          canonical.document,
+        )
+      : kind === "change_status"
+        ? before!.content
+        : designTextDoc(change.content);
+    if (!canonical && (kind === "add_section" || kind === "revise_section")) {
       if (!change.section)
         throw new AppError(400, "A section proposal requires a heading");
       const nodes = before!.content.content ?? [];
@@ -657,7 +731,7 @@ export class Store {
     const id = randomUUID();
     this.db
       .prepare(
-        `INSERT INTO proposals (id,conversation_id,message_id,project_id,chapter_id,title,content,reason,base_revision,status,created_at,kind,description,section,proposed_status,related_chapter_ids,before_snapshot,parent_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        `INSERT INTO proposals (id,conversation_id,message_id,project_id,chapter_id,title,content,reason,base_revision,status,created_at,kind,description,section,proposed_status,related_chapter_ids,before_snapshot,parent_id,document_payload) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       )
       .run(
         id,
@@ -684,6 +758,7 @@ export class Store {
             })
           : null,
         parentId,
+        document ? JSON.stringify(document) : null,
       );
     return proposal(
       this.db.prepare("SELECT * FROM proposals WHERE id=?").get(id)!,
@@ -749,6 +824,8 @@ export class Store {
       )
         throw new AppError(400, "Parent chapter belongs to another project");
       if (decision === "accept") {
+        const safety = documentProposalSafety(p);
+        if (!safety.safe) throw new AppError(409, safety.reason);
         const conversation = this.db
           .prepare("SELECT chapter_id FROM conversations WHERE id=?")
           .get(p.conversationId)!;

@@ -3,6 +3,7 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { migrateKnowledge } from "./knowledge-migration.js";
 import { migrateKnowledgeProposals } from "./proposal-migration.js";
+import { migrateDocumentProposals } from "./document-migration.js";
 
 export function openDatabase(path: string) {
   if (path !== ":memory:")
@@ -93,5 +94,6 @@ export function openDatabase(path: string) {
   }
   migrateKnowledge(db);
   migrateKnowledgeProposals(db);
+  migrateDocumentProposals(db);
   return db;
 }

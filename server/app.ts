@@ -281,11 +281,32 @@ export function createApp(
         if (
           context.activeTruncated &&
           result.proposals.some(
-            (p) => p.kind === "update_chapter" || (!p.kind && p.chapterId),
+            (p) =>
+              p.kind === "update_chapter" ||
+              (p.kind === "document" &&
+                p.document.action === "update_chapter") ||
+              (!p.kind && p.chapterId),
           )
         )
           throw new Error(
             "This chapter is too large for a safe full replacement. Ask for a section proposal instead.",
+          );
+        if (
+          result.proposals.some(
+            (p) =>
+              p.kind !== "document" &&
+              p.kind !== "knowledge" &&
+              [
+                "create_chapter",
+                "create_subchapter",
+                "update_chapter",
+                "add_section",
+                "revise_section",
+              ].includes(p.kind ?? "update_chapter"),
+          )
+        )
+          throw new Error(
+            "The AI returned a legacy plain-text document operation. Regenerate using the canonical rich-document contract.",
           );
         store.transaction(() => {
           const message = store.addMessage(
@@ -310,6 +331,8 @@ export function createApp(
                 p,
                 p.chapterId ? active.revision : null,
                 p.chapterId ? active : undefined,
+                context.documentReceipt,
+                active,
               ),
             );
         });

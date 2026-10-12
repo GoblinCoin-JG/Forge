@@ -21,7 +21,8 @@ import {
   type Workflow,
 } from "../../shared/types";
 import { chapterOutline } from "../../shared/chapter-tree";
-import { lineDiff } from "../../shared/diff";
+import { documentProposalSafety } from "../../shared/document-proposals";
+import { DocumentComparison } from "./DocumentComparison";
 import { api, chat } from "../api";
 import { Modal } from "./Modal";
 import { KnowledgeProposalReview } from "./knowledge/KnowledgeProposalReview";
@@ -227,6 +228,7 @@ export function Workshop({
   const isRecord =
     review?.kind === "record_decision" || review?.kind === "record_question";
   const isStatus = review?.kind === "change_status";
+  const documentSafety = review ? documentProposalSafety(review) : undefined;
   const actions: { mode: Workflow; label: string; prompt: string }[] = [
     {
       mode: "extract",
@@ -598,42 +600,37 @@ export function Workshop({
             <div className="proposal-prose">{docText(review.content)}</div>
           ) : (
             <>
-              <div className="proposal-comparison">
-                {before && (
-                  <section>
-                    <span className="eyebrow">ORIGINAL · {before.status}</span>
-                    <div className="proposal-prose">
-                      {docText(before.content) || "This chapter is blank."}
-                    </div>
-                  </section>
+              {before?.title !== undefined &&
+                review.kind === "update_chapter" &&
+                before.title !== review.title && (
+                  <p>
+                    Chapter title: {before.title} → {review.title}
+                  </p>
                 )}
-                <section>
-                  <span className="eyebrow">PROPOSED · REQUIRES APPROVAL</span>
-                  <div className="proposal-prose">
-                    {docText(review.content)}
-                  </div>
-                </section>
-              </div>
-              {before && (
-                <details className="proposal-diff" open>
-                  <summary>Changes · − removed · + added</summary>
-                  {lineDiff(
-                    docText(before.content),
-                    docText(review.content),
-                  ).map((line, i) => (
-                    <div key={i} className={`diff-line ${line.kind}`}>
-                      <span aria-hidden="true">
-                        {line.kind === "added"
-                          ? "+ "
-                          : line.kind === "removed"
-                            ? "− "
-                            : "  "}
-                      </span>
-                      {line.text || " "}
-                    </div>
-                  ))}
-                </details>
+              <p
+                className={documentSafety?.safe ? "muted" : "inline-error"}
+                role={documentSafety?.safe ? undefined : "alert"}
+              >
+                {documentSafety?.legacy ? "Legacy proposal · " : ""}
+                {documentSafety?.reason}
+              </p>
+              {review.document && (
+                <p className="muted">
+                  Source: saved chapter version {review.document.sourceRevision}
+                  .{" "}
+                  {review.document.receipt.complete
+                    ? "The AI received the complete rich document."
+                    : review.kind === "revise_section"
+                      ? "The AI received the complete selected section; Forge preserves the rest of the saved document."
+                      : "The AI received partial context; Forge preserves the complete saved document while adding this section."}
+                </p>
               )}
+              <DocumentComparison
+                before={before?.content}
+                after={review.content}
+                beforeLabel={`Original · ${before?.status ?? "Saved"}`}
+                afterLabel="Proposed · requires approval"
+              />
             </>
           )}
           <p className="muted">
@@ -648,15 +645,15 @@ export function Workshop({
               {error}
             </p>
           )}
-          <div className="modal-actions">
-            {stale && (
+          <div className="modal-actions document-proposal-actions">
+            {(stale || documentSafety?.safe === false) && (
               <button
                 disabled={reviewing || busy}
                 onClick={() => {
                   const p = review;
                   setReview(undefined);
                   void send(
-                    `Regenerate the ${p.kind} proposal "${p.title}" using current chapter content. Intended change: ${p.description}. Previously proposed: ${docText(p.content)}. Produce a fresh proposal for review; do not apply it.`,
+                    `Regenerate a new ${p.kind} proposal "${p.title}" using the current canonical rich document contract. ${p.section ? `Affected section: ${p.section}. Keep this a localized section operation and leave all other sections alone.` : ""} Intended change: ${p.description}. Reason: ${p.reason}. Preserve existing formatting, links and unrelated sections. If the target or source coverage is unclear, ask for clarification. Produce a fresh canonical JSON proposal for review; do not apply it.`,
                     "improve",
                   );
                 }}
@@ -669,7 +666,7 @@ export function Workshop({
             </button>
             <button
               className="primary"
-              disabled={reviewing || stale}
+              disabled={reviewing || stale || documentSafety?.safe === false}
               onClick={() => void decide("accept")}
             >
               {reviewing ? "Saving…" : "Accept change"}

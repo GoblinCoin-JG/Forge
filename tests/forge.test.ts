@@ -8,6 +8,8 @@ import { Store } from "../server/store.js";
 import { createApp } from "../server/app.js";
 import { docText, textDoc, docSchema } from "../shared/types.js";
 import { partialReply, type DesignAssistant } from "../server/ai.js";
+import { canonicalOffer } from "./fixtures/document-offer.js";
+import { documentExcerpt } from "../shared/document-context.js";
 
 function fixture() {
   const db = openDatabase(":memory:");
@@ -30,13 +32,15 @@ function propose(f: ReturnType<typeof fixture>) {
     w.conversationId,
     m.id,
     f.project.id,
-    {
+    canonicalOffer({
       chapterId: f.chapter.id,
       title: "Game Vision",
       content: "Explore. Salvage. Return home.",
       reason: "A clearer player experience.",
-    },
+    }),
     f.chapter.revision,
+    f.chapter,
+    documentExcerpt(f.chapter.content, 500000).receipt,
   );
 }
 
@@ -299,12 +303,12 @@ test("streaming provides active chapter and approved context, persists proposals
     return {
       reply: "Let us explore the promise.",
       proposals: [
-        {
+        canonicalOffer({
           chapterId: f.chapter.id,
           title: "Game Vision",
           content: "A promise of discovery.",
           reason: "Clear player motivation.",
-        },
+        }),
       ],
     };
   };

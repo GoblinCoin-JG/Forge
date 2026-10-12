@@ -1,4 +1,6 @@
 import { test } from "node:test";
+import { canonicalOffer } from "./fixtures/document-offer.js";
+import { documentExcerpt } from "../shared/document-context.js";
 import assert from "node:assert/strict";
 import { designTextDoc, formatPlainDesignText } from "../shared/design-text.js";
 import { docSchema, textDoc, docText, type Doc } from "../shared/types.js";
@@ -84,14 +86,16 @@ test("accepted AI chapter and section proposals persist formatted nodes", () => 
       w.conversationId,
       m.id,
       project.id,
-      {
+      canonicalOffer({
         kind: "update_chapter",
         chapterId: chapter.id,
         title: chapter.title,
         content: "##Gameplay Direction\n\n**Cooperative** discovery.",
         reason: "Clarify direction",
-      },
+      }),
       0,
+      chapter,
+      documentExcerpt(chapter.content, 500000).receipt,
     );
     assert.equal(p.content.content![0].type, "heading");
     assert.deepEqual(store.chapter(chapter.id).content, chapter.content);

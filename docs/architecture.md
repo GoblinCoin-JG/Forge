@@ -92,6 +92,14 @@ Review outcomes are explicit: concepts/relationships accept as Exploring or Appr
 
 `KnowledgeProposalReview.tsx` renders original/proposed fields, associations, authority choices, dependency state and stale feedback without raw JSON. Accepted result links open concepts, a relationship's owning concept detail, or the matching record workspace with the result highlighted. The chapter-based Workshop and SSE transport remain in place. Structured context adds bounded chapter/name-ranked concepts, a single relationship hop and associated records, including explicitly historical decisions. Current user instructions remain complete; broader retrieval manifests and document-fidelity changes remain later work. See [Milestone 4 verification](GOAL_3_MILESTONE_4.md).
 
+## Goal 3 document integrity
+
+Milestone 5 shares `shared/document.ts` extensions between the live editor, read-only previews, and provider-independent validation. Validation checks supported nodes, attributes, marks, nesting, links, size, and depth against the actual Tiptap schema, while retaining the submitted JSON exactly. Automatic trailing-node insertion and editor-load Markdown conversion are disabled.
+
+`shared/document-proposals.ts` defines the version 2 document envelope and materializes localized edits on the backend from the captured source revision. Creation/full updates carry complete documents; section operations carry rich block fragments and a unique heading selector. `shared/document-context.ts` supplies whole blocks and backend-owned coverage receipts. Full replacements require complete coverage; section revisions require the complete selected range. The provider schema mirrors these contracts without defining persistence or approval authority.
+
+Migration 7 adds nullable immutable document metadata and protects canonical proposal content/source fields. Existing chapter snapshots, approvals, knowledge metadata, and legacy proposals are retained. Store acceptance revalidates scope and content and reuses transactional revision/history/provenance checks. Unsafe legacy full replacements require regeneration; safe stored creations and localized edits retain their exact saved content. `DocumentComparison.tsx` displays rich previews with structural, formatting, and link differences. Unsupported saved structures receive a retained-source read-only guard. See [Milestone 5 report](GOAL_3_MILESTONE_5.md) for contracts, acceptance audit, and verification.
+
 ## Goal 2 implementation
 
 1. Reused the existing SQLite store, chapter revision checks, SSE adapter, editor flush, and chapter conversations.
@@ -103,5 +111,5 @@ Review outcomes are explicit: concepts/relationships accept as Exploring or Appr
 
 - Goal 2 verification uses a deterministic assistant and does not make a live provider call. Provider quality still depends on the configured model.
 - Context uses character budgets and keyword overlap, not a tokenizer or semantic retrieval. Older conversations remain persisted but only recent completed messages are sent. There is no automatic conversation summarization or contradiction classifier; significant unresolved tensions can be proposed as open questions.
-- AI text supports headings, bold emphasis, simple lists, and fenced code through a shared text-to-editor converter. It is not a full Markdown engine. Legacy unmarked paragraphs are normalized on editor load and autosaved with optimistic concurrency; existing rich nodes and code blocks are preserved. Section operations preserve unrelated rich text; full replacement recreates only the proposed formatting. Excerpted chapters support section operations instead of full replacement.
+- AI document operations use canonical rich JSON validated against the actual editor schema. Whole-block excerpts permit localized operations when the complete target section is supplied; full replacements require complete source coverage. Legacy text conversion is confined to compatibility storage paths; newly generated text document operations are rejected. Opening documents never repairs Markdown automatically. Unsupported historical structures remain retained and disclosed rather than silently normalized.
 - This remains a single-user local application. Concurrent browser edits are detected and rejected rather than merged. A hard crash before an autosave completes can lose unsaved draft text.

@@ -730,8 +730,11 @@ test("real OpenAI adapter sends strict knowledge schema and parses streamed type
       const body = JSON.parse(String(input!.body));
       const items =
         body.response_format.json_schema.schema.properties.proposals.items;
-      assert.equal(items.anyOf[0].properties.kind.enum[0], "knowledge");
-      assert.equal(items.anyOf[0].properties.knowledge.anyOf.length, 10);
+      const knowledgeSchema = items.anyOf.find(
+        (s: any) => s.properties.kind.enum[0] === "knowledge",
+      );
+      assert.ok(knowledgeSchema);
+      assert.equal(knowledgeSchema.properties.knowledge.anyOf.length, 10);
       assert.ok(body.messages[0].content.includes("newConcept"));
       const result = JSON.stringify({
         reply: "Movement deserves a concept.",

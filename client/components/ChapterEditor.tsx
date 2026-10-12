@@ -7,7 +7,8 @@ import {
   useState,
 } from "react";
 import { useEditor, EditorContent } from "@tiptap/react";
-import StarterKit from "@tiptap/starter-kit";
+import { documentExtensions, validDocument } from "../../shared/document";
+import { DocumentPreview } from "./DocumentPreview";
 import Placeholder from "@tiptap/extension-placeholder";
 import {
   Bold,
@@ -31,7 +32,6 @@ import {
   type Maturity,
 } from "../../shared/types";
 import { chapterOutline, isDescendant } from "../../shared/chapter-tree";
-import { formatPlainDesignText } from "../../shared/design-text";
 import { sameChapterContent } from "../../shared/chapter-content";
 import { api } from "../api";
 import { Modal } from "./Modal";
@@ -60,13 +60,15 @@ export const ChapterEditor = forwardRef<
     dirty = useRef(false),
     timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined),
     queue = useRef<Promise<boolean>>(Promise.resolve(true));
-  const initialContent = useRef(
-    chapter.approvedRevision === null
-      ? formatPlainDesignText(chapter.content)
-      : chapter.content,
-  );
-  const needsFormatting = useRef(
-    JSON.stringify(initialContent.current) !== JSON.stringify(chapter.content),
+  const initialContent = useRef(chapter.content);
+  const legacyEmpty =
+    initialContent.current.type === "doc" &&
+    !initialContent.current.content?.length &&
+    Object.keys(initialContent.current).every(
+      (key) => key === "type" || key === "content",
+    );
+  const [sourceSupported] = useState(
+    () => Boolean(validDocument(initialContent.current)) || legacyEmpty,
   );
   const draft = useRef({
     title: chapter.title,
@@ -122,20 +124,16 @@ export const ChapterEditor = forwardRef<
     timer.current = setTimeout(() => void save(), 900);
   };
   const editor = useEditor({
+    editable: sourceSupported,
     shouldRerenderOnTransaction: true,
     extensions: [
-      StarterKit.configure({
-        link: {
-          openOnClick: false,
-          HTMLAttributes: { rel: "noopener noreferrer" },
-        },
-      }),
+      ...documentExtensions(),
       Placeholder.configure({
         placeholder:
           "What should this chapter help you understand? Start writing…",
       }),
     ],
-    content: initialContent.current,
+    content: sourceSupported ? initialContent.current : undefined,
     editorProps: {
       attributes: {
         "aria-label": "Chapter content",
@@ -145,15 +143,11 @@ export const ChapterEditor = forwardRef<
       },
     },
     onUpdate: ({ editor }) => {
+      if (!sourceSupported) return;
       draft.current.content = editor.getJSON() as Doc;
       changed();
     },
   });
-  useEffect(() => {
-    if (editor && needsFormatting.current) {
-      changed();
-    }
-  }, [editor]);
   useImperativeHandle(
     ref,
     () => ({
@@ -183,6 +177,18 @@ export const ChapterEditor = forwardRef<
     return () => window.removeEventListener("keydown", handler);
   }, [save]);
   if (!editor) return null;
+  if (!sourceSupported)
+    return (
+      <div className="editor-integrity-error">
+        <p role="alert" className="inline-error">
+          This saved document cannot be edited faithfully with the supported
+          format. It remains unchanged. Restore a supported version through
+          History, or request a reviewed rich-document replacement in the
+          Workshop.
+        </p>
+        <DocumentPreview content={chapter.content} />
+      </div>
+    );
   const reloadSaved = async () => {
     if (
       !window.confirm(
@@ -193,10 +199,20 @@ export const ChapterEditor = forwardRef<
     clearTimeout(timer.current);
     try {
       const c = await api<Chapter>(`/chapters/${chapter.id}`);
-      const content =
-        c.approvedRevision === null
-          ? formatPlainDesignText(c.content)
-          : c.content;
+      const content = c.content;
+      if (
+        !Boolean(validDocument(content)) &&
+        !(
+          content.type === "doc" &&
+          !content.content?.length &&
+          Object.keys(content).every(
+            (key) => key === "type" || key === "content",
+          )
+        )
+      )
+        throw new Error(
+          "This saved version has unsupported structure. Reopen the chapter to inspect its retained source or restore a supported version through History.",
+        );
       editor.commands.setContent(content, { emitUpdate: false });
       draft.current = {
         title: c.title,

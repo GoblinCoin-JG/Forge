@@ -2821,7 +2821,8 @@ button.danger {
 .knowledge-proposal-proposed {
   border-left: 3px solid #d9aa73;
 }
-.knowledge-proposal-actions {
+.knowledge-proposal-actions,
+.document-proposal-actions {
   position: sticky;
   bottom: -25px;
   z-index: 1;
@@ -2843,4 +2844,50 @@ button.danger {
 .review-record button {
   margin-left: auto;
   font-size: 11px;
+}
+.rich-document-comparison .proposal-comparison {
+  align-items: start;
+}
+.rich-document-comparison .history-document {
+  max-height: 45vh;
+  overflow: auto;
+  padding: 14px;
+}
+.rich-document-comparison .history-document .tiptap {
+  padding: 0;
+}
+.document-structural-diff {
+  margin: 18px 0;
+}
+.document-structural-diff summary {
+  cursor: pointer;
+  color: var(--heading);
+}
+.document-change {
+  padding: 12px;
+  margin: 9px 0;
+  border-left: 3px solid var(--accent);
+  background: rgba(255, 255, 255, 0.025);
+  border-radius: 4px;
+}
+.document-change.added {
+  border-color: var(--green);
+}
+.document-change.removed {
+  border-color: var(--red);
+}
+.document-change ul {
+  padding-left: 18px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.history-document-source pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 30vh;
+  overflow: auto;
+}
+.editor-integrity-error {
+  padding: 24px;
+  overflow: auto;
 }

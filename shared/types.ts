@@ -1,9 +1,13 @@
 import { z } from "zod";
+import { docSchema, type Doc } from "./document.js";
+export { docSchema } from "./document.js";
+export type { Doc } from "./document.js";
 import type { KnowledgeSource } from "./knowledge.js";
 import type {
   KnowledgeProposalData,
   AppliedKnowledge,
 } from "./knowledge-proposals.js";
+import type { DocumentProposalData } from "./document-proposals.js";
 
 export const statuses = [
   "Exploring",
@@ -12,75 +16,6 @@ export const statuses = [
   "Needs Revision",
 ] as const;
 export type Maturity = (typeof statuses)[number];
-export type Doc = { type: "doc"; content?: Record<string, unknown>[] };
-const nodeTypes = new Set([
-  "paragraph",
-  "text",
-  "heading",
-  "bulletList",
-  "orderedList",
-  "listItem",
-  "blockquote",
-  "hardBreak",
-  "horizontalRule",
-  "codeBlock",
-]);
-function validNode(node: unknown, depth = 0): boolean {
-  if (depth > 20 || !node || typeof node !== "object" || Array.isArray(node))
-    return false;
-  const n = node as Record<string, unknown>;
-  if (typeof n.type !== "string" || !nodeTypes.has(n.type)) return false;
-  if (n.type === "text" && (typeof n.text !== "string" || n.text.length === 0))
-    return false;
-  if (n.type !== "text" && n.text !== undefined) return false;
-  if (
-    n.attrs !== undefined &&
-    (!n.attrs || typeof n.attrs !== "object" || Array.isArray(n.attrs))
-  )
-    return false;
-  if (
-    n.type === "heading" &&
-    ![1, 2, 3, 4, 5, 6].includes((n.attrs as { level?: number })?.level ?? 0)
-  )
-    return false;
-  if (
-    n.content !== undefined &&
-    (!Array.isArray(n.content) ||
-      !n.content.every((child) => validNode(child, depth + 1)))
-  )
-    return false;
-  if (
-    n.marks !== undefined &&
-    (!Array.isArray(n.marks) ||
-      !n.marks.every((mark) => {
-        if (!mark || typeof mark !== "object") return false;
-        if (
-          !["bold", "italic", "strike", "code", "underline", "link"].includes(
-            mark.type,
-          )
-        )
-          return false;
-        return (
-          mark.type !== "link" ||
-          (typeof mark.attrs?.href === "string" &&
-            /^(https?:|mailto:)/i.test(mark.attrs.href))
-        );
-      }))
-  )
-    return false;
-  return true;
-}
-export const docSchema = z
-  .object({
-    type: z.literal("doc"),
-    content: z.array(z.record(z.unknown())).optional(),
-  })
-  .strict()
-  .refine((v) => JSON.stringify(v).length <= 500_000, "Chapter is too large")
-  .refine(
-    (v) => !v.content || v.content.every((n) => validNode(n)),
-    "Invalid rich-text document",
-  );
 export const projectInput = z.object({
   title: z.string().trim().max(120).default(""),
   premise: z.string().trim().max(20000).default(""),
@@ -149,6 +84,7 @@ export interface Message {
   createdAt: string;
 }
 export interface Proposal {
+  document?: DocumentProposalData | null;
   knowledge?: KnowledgeProposalData | null;
   appliedResult?: AppliedKnowledge | null;
   id: string;
@@ -180,6 +116,7 @@ export const proposalKinds = [
   "record_decision",
   "record_question",
   "knowledge",
+  "document",
 ] as const;
 export type ProposalKind = (typeof proposalKinds)[number];
 export const workflows = [
@@ -217,6 +154,7 @@ export interface Workshop {
   records: DesignRecord[];
 }
 export function textDoc(text: string): Doc {
+  if (!text.trim()) return { type: "doc", content: [{ type: "paragraph" }] };
   return {
     type: "doc",
     content: text
