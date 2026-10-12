@@ -36,7 +36,13 @@ Open **History** beside a chapter's title to inspect saved versions with their o
 
 ## Structured knowledge foundation
 
-Goal 3's backend now persists project-owned design concepts, typed relationships, normalized chapter associations, decision supersession, question answers/reopening, and immutable provenance/change evidence. These APIs are ready for the next UI milestone; a Design Knowledge view and AI extraction are not yet implemented. See [Milestone 2 schema, APIs, and verification](docs/GOAL_3_MILESTONE_2.md). The existing question-resolution action now asks for its answer and uses revision checks.
+Open **Design Knowledge** beneath a project to browse concepts, search names, and filter category or maturity. Create exploratory concepts, edit them, explicitly approve them, or archive and return them. Each detail view links to chapters, connected concepts, decisions, questions, exact source evidence, and saved history. Edits to approved knowledge show the newer unreviewed state and preserve the earlier approved version.
+
+Connect existing concepts with a typed relationship and rationale; approve or retire it deliberately. Decisions are explicit approved choices: superseding creates a replacement while retaining the earlier statement. Questions retain recorded answers and earlier resolutions when reopened. Historical controls expose archived concepts, retired relationships, and superseded decisions.
+
+The chapter's expandable **Design Knowledge** section shows associated concepts, relevant approved decisions, open questions, and relationships. Associate or remove concepts there, open a concept, and return through its chapter links. Knowledge changes do not rewrite chapter prose. Conflicting writes preserve the form draft; explicitly discard and reload to inspect newer data. See [Milestone 3 UI and verification](docs/GOAL_3_MILESTONE_3.md) and [Milestone 2 schema and APIs](docs/GOAL_3_MILESTONE_2.md).
+
+In the Workshop, open **Design together → Extract Design Knowledge** to propose meaningful concepts, relationships, decisions and questions from the chapter and conversation. Ordinary conversation can also propose refinements, chapter links, relationship updates/retirement, decision supersession and question answers. Review shows original/proposed content, rationale, associations and prerequisites. Choose **Accept as Exploring** or **Approve knowledge** for concepts/relationships; decisions require **Approve decision**. Questions and proposed resolutions have separate acceptance controls. Nothing is applied automatically. Accept prerequisite concepts individually before dependent relationships or records; a changed/rejected prerequisite requires a fresh proposal. Accepted cards link to resulting Design Knowledge. See [Milestone 4 contract and verification](docs/GOAL_3_MILESTONE_4.md).
 
 ## Optional AI connection
 
@@ -48,7 +54,7 @@ cp .env.example .env
 
 Set `OPENAI_API_KEY` in `.env`, restart Forge, and reload the browser. Settings in `.env` take precedence over inherited shell settings. Alternatively, set it in the backend process environment. Keys stay on the backend and are never returned to the browser, saved in SQLite, or committed to Git. The optional `OPENAI_MODEL` defaults to `gpt-4.1-mini` and must support streaming chat completions and strict structured outputs. Requests need outbound access to `api.openai.com` and incur your provider's normal API usage costs.
 
-The Workshop builds bounded context from your project title and premise, Game Vision, the active chapter, relevant chapters, approved decisions, open questions, pending suggestions, and recent completed messages. Maturity labels distinguish approved direction from exploratory material. Each chapter retains its conversation across sessions.
+The Workshop builds bounded context from your project title and premise, Game Vision, the active chapter, relevant chapters, structured concepts and connections, approved decisions, open questions, pending suggestions, and recent completed messages. Relevant superseded decisions retain their historical labels. Maturity and authority labels distinguish approved direction from exploratory material. The complete current message is preserved within the API's 20,000-character limit; older conversation remains excerpted. Each chapter retains its conversation across sessions.
 
 Open **Design together** to explore a chapter, identify missing details, challenge a design, suggest improvements, or organize notes from the composer. These actions run contextual workflows immediately. You can also ask naturally for a chapter revision, a new chapter, a section addition or revision, a maturity change, or a meaningful decision or open question to record.
 

@@ -201,6 +201,7 @@ export function createApp(
         .object({
           decision: z.enum(["accept", "reject"]),
           parentId: z.string().uuid().nullable().optional(),
+          outcome: z.enum(["exploring", "approve", "accept"]).optional(),
         })
         .strict()
         .parse(request.body);
@@ -208,6 +209,7 @@ export function createApp(
         request.params.id,
         input.decision,
         input.parentId === undefined ? undefined : { parentId: input.parentId },
+        input.outcome,
       );
     },
   );
@@ -241,6 +243,10 @@ export function createApp(
         active.id,
         [...workshop.messages, user],
         workflow ?? null,
+      );
+      const capturedKnowledge = store.knowledge.projectKnowledge(
+        project.id,
+        true,
       );
       const controller = new AbortController();
       const abort = () => controller.abort();
@@ -287,16 +293,25 @@ export function createApp(
             "assistant",
             result.reply,
           );
-          result.proposals.forEach((p) =>
-            store.addProposal(
-              workshop.conversationId,
-              message.id,
-              project.id,
-              p,
-              p.chapterId ? active.revision : null,
-              p.chapterId ? active : undefined,
-            ),
+          store.knowledgeProposals.addBatch(
+            workshop.conversationId,
+            message.id,
+            active,
+            capturedKnowledge,
+            result.proposals.filter((p) => p.kind === "knowledge"),
           );
+          result.proposals
+            .filter((p) => p.kind !== "knowledge")
+            .forEach((p) =>
+              store.addProposal(
+                workshop.conversationId,
+                message.id,
+                project.id,
+                p,
+                p.chapterId ? active.revision : null,
+                p.chapterId ? active : undefined,
+              ),
+            );
         });
         emit("complete", store.workshop(active.id));
       } catch (error) {
@@ -314,7 +329,7 @@ export function createApp(
         );
         const safe =
           error instanceof ZodError
-            ? "The AI returned an invalid proposal. No book changes were made."
+            ? "The AI returned an invalid proposal. No Design Book or knowledge changes were made."
             : error instanceof Error
               ? error.message
               : "The Workshop could not complete this request.";

@@ -23,6 +23,7 @@ import {
   Feather,
   ArrowUpRight,
   Loader2,
+  Lightbulb,
 } from "lucide-react";
 import { type Chapter, type Project } from "../shared/types";
 import { api } from "./api";
@@ -32,6 +33,12 @@ import { chapterOutline } from "../shared/chapter-tree";
 import { DesignBookNav } from "./components/DesignBookNav";
 import { Workshop } from "./components/Workshop";
 import { ChapterHistory } from "./components/ChapterHistory";
+import { useDesignKnowledge } from "./knowledge";
+import {
+  KnowledgeWorkspace,
+  type KnowledgeTab,
+} from "./components/knowledge/KnowledgeWorkspace";
+import { ChapterKnowledge } from "./components/knowledge/ChapterKnowledge";
 
 export function App() {
   const [projects, setProjects] = useState<Project[]>([]),
@@ -61,6 +68,13 @@ export function App() {
     [search, setSearch] = useState(""),
     [submitting, setSubmitting] = useState(false);
   const editor = useRef<EditorHandle>(null);
+  const navigationGeneration = useRef(0);
+  const [projectView, setProjectView] = useState<"book" | "knowledge">("book"),
+    [selectedConcept, setSelectedConcept] = useState<string>(),
+    [knowledgeTab, setKnowledgeTab] = useState<KnowledgeTab>("concepts");
+  const knowledge = useDesignKnowledge(project?.id);
+  const currentProject = useRef(project?.id);
+  currentProject.current = project?.id;
   const [historyChapter, setHistoryChapter] = useState<Chapter>(),
     [archiveTarget, setArchiveTarget] = useState<Chapter>(),
     [archivedOpen, setArchivedOpen] = useState(false),
@@ -94,20 +108,29 @@ export function App() {
   const flush = async () =>
     editor.current ? await editor.current.flush() : true;
   const home = async () => {
+    const ticket = ++navigationGeneration.current;
     if (!(await flush())) return;
+    if (ticket !== navigationGeneration.current) return;
     setProject(undefined);
     setActiveId(undefined);
+    setProjectView("book");
+    setSelectedConcept(undefined);
     setMobileNav(false);
     await loadProjects();
   };
   const openProject = async (p: Project) => {
+    const ticket = ++navigationGeneration.current;
     if (!(await flush())) return;
     try {
       const list = await api<Chapter[]>(`/projects/${p.id}/chapters`);
+      if (ticket !== navigationGeneration.current) return;
       setProject(p);
       setChapters(list);
       setEditorGeneration((g) => g + 1);
       setActiveId(list[0]?.id);
+      setProjectView("book");
+      setSelectedConcept(undefined);
+      setKnowledgeTab("concepts");
       setError("");
       setMobileNav(false);
       setSaved("Saved locally");
@@ -116,9 +139,54 @@ export function App() {
     }
   };
   const openChapter = async (id: string) => {
+    if (!project || currentProject.current !== project.id) return;
+    const ticket = ++navigationGeneration.current;
     if (!(await flush())) return;
-    setActiveId(id);
-    setSaved("Saved locally");
+    if (!project) return;
+    try {
+      const [c, list] = await Promise.all([
+        api<Chapter>(`/chapters/${id}`),
+        api<Chapter[]>(`/projects/${project.id}/chapters`),
+      ]);
+      if (ticket !== navigationGeneration.current) return;
+      if (c.projectId !== project.id)
+        throw new Error("This chapter belongs to another project.");
+      if (c.archivedAt) {
+        setHistoryChapter(c);
+        return;
+      }
+      setChapters(list);
+      setEditorGeneration((g) => g + 1);
+      setProjectView("book");
+      setActiveId(id);
+      setSaved("Saved locally");
+      setMobileNav(false);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+  const openKnowledge = async (tab: KnowledgeTab = "concepts", id?: string) => {
+    if (!project || currentProject.current !== project.id) return;
+    const ticket = ++navigationGeneration.current;
+    if (!(await flush()) || !project || ticket !== navigationGeneration.current)
+      return;
+    setProjectView("knowledge");
+    setKnowledgeTab(tab);
+    setSelectedConcept(id);
+    setMobileNav(false);
+    if (projectView !== "knowledge" || !knowledge.data)
+      try {
+        await knowledge.reload();
+      } catch {
+        /* Knowledge panels show the refresh error. */
+      }
+  };
+  const openBook = async () => {
+    if (project && currentProject.current !== project.id) return;
+    const ticket = ++navigationGeneration.current;
+    if (!(await flush())) return;
+    if (ticket !== navigationGeneration.current) return;
+    setProjectView("book");
     setMobileNav(false);
   };
   const openModal = (name: typeof modal) => {
@@ -196,10 +264,14 @@ export function App() {
     }
   };
   const refreshAfterReview = async () => {
-    if (!project) return;
-    setChapters(await api<Chapter[]>(`/projects/${project.id}/chapters`));
+    if (!project || currentProject.current !== project.id) return;
+    const ticket = navigationGeneration.current;
+    const list = await api<Chapter[]>(`/projects/${project.id}/chapters`);
+    if (ticket !== navigationGeneration.current) return;
+    setChapters(list);
     setEditorGeneration((g) => g + 1);
     await loadProjects();
+    await knowledge.reload();
   };
   const onSaved = (c: Chapter) => {
     setChapters((cs) => cs.map((old) => (old.id === c.id ? c : old)));
@@ -280,9 +352,9 @@ export function App() {
           </button>
           <button
             aria-label="Design Book"
-            className={project ? "active" : ""}
+            className={project && projectView === "book" ? "active" : ""}
             disabled={!project}
-            onClick={() => setMobileNav((v) => !v)}
+            onClick={() => void openBook()}
           >
             <BookOpen size={20} />
           </button>
@@ -329,6 +401,9 @@ export function App() {
               onOpenChapter={openChapter}
               onAddChapter={() => openModal("new-chapter")}
               onReorder={reorder}
+              projectView={projectView}
+              onOpenBook={() => void openBook()}
+              onOpenKnowledge={() => void openKnowledge()}
             />
           </div>
           <div className="sidebar-bottom">
@@ -349,9 +424,23 @@ export function App() {
               <Menu size={18} />
             </button>
             <span>
-              {project ? <BookOpen size={14} /> : <FolderOpen size={14} />}
+              {project ? (
+                projectView === "knowledge" ? (
+                  <Lightbulb size={14} />
+                ) : (
+                  <BookOpen size={14} />
+                )
+              ) : (
+                <FolderOpen size={14} />
+              )}
             </span>
-            <span>{project ? "Design Book" : "Projects"}</span>
+            <span>
+              {project
+                ? projectView === "knowledge"
+                  ? "Design Knowledge"
+                  : "Design Book"
+                : "Projects"}
+            </span>
             <span className="tab-dot" />
           </div>
           {error && !modal && (
@@ -376,13 +465,25 @@ export function App() {
                     <span>{project.title}</span>
                   </div>
                   <h1>
-                    Design Book
+                    {projectView === "knowledge"
+                      ? "Design Knowledge"
+                      : "Design Book"}
                     <span className="book-heading-note">
-                      A living record of your game.
+                      {projectView === "knowledge"
+                        ? "The subjects and choices behind your game."
+                        : "A living record of your game."}
                     </span>
                   </h1>
                 </div>
                 <div className="book-actions">
+                  {projectView === "knowledge" && (
+                    <button
+                      className="quiet-button"
+                      onClick={() => void openBook()}
+                    >
+                      Open Design Book
+                    </button>
+                  )}
                   <button
                     className="quiet-button"
                     onClick={() => void showArchive()}
@@ -407,71 +508,116 @@ export function App() {
                   )}
                 </div>
               </div>
-              <div
-                className={`book-workspace ${!workshop ? "workshop-hidden" : ""}`}
-              >
-                <section className="document-pane">
-                  {active ? (
-                    <>
-                      <div className="document-context">
-                        <div>
-                          <Feather size={14} />
-                          <span>{active.title}</span>
+              {projectView === "knowledge" ? (
+                <KnowledgeWorkspace
+                  key={project.id}
+                  controller={knowledge}
+                  selectedId={selectedConcept}
+                  onSelectConcept={(id) => void openKnowledge("concepts", id)}
+                  onNavigateChapter={(id) => void openChapter(id)}
+                  tab={knowledgeTab}
+                  onTab={setKnowledgeTab}
+                />
+              ) : (
+                <div
+                  className={`book-workspace ${!workshop ? "workshop-hidden" : ""}`}
+                >
+                  <section className="document-pane">
+                    {active ? (
+                      <>
+                        <div className="document-context">
+                          <div>
+                            <Feather size={14} />
+                            <span>{active.title}</span>
+                          </div>
+                          <button
+                            className="quiet-button"
+                            onClick={() => void showHistory(active)}
+                          >
+                            History
+                          </button>
+                          <button
+                            className="icon-button"
+                            aria-label="Archive chapter"
+                            onClick={() => void confirmArchive()}
+                          >
+                            <Trash2 size={14} />
+                          </button>
                         </div>
+                        <ChapterKnowledge
+                          chapterId={active.id}
+                          controller={knowledge}
+                          onSelectConcept={(id) =>
+                            void openKnowledge("concepts", id)
+                          }
+                          onOpenWorkspace={(tab) => void openKnowledge(tab)}
+                        />
+                        <ChapterEditor
+                          key={`${active.id}-${editorGeneration}`}
+                          ref={editor}
+                          chapter={active}
+                          chapters={chapters}
+                          onSaved={onSaved}
+                          onState={setSaved}
+                        />
+                      </>
+                    ) : (
+                      <div className="blank-book">
+                        <BookOpen size={35} />
+                        <h2>A new chapter awaits.</h2>
+                        <p>
+                          Add a chapter to continue shaping your game's design.
+                        </p>
                         <button
-                          className="quiet-button"
-                          onClick={() => void showHistory(active)}
+                          className="primary"
+                          onClick={() => openModal("new-chapter")}
                         >
-                          History
-                        </button>
-                        <button
-                          className="icon-button"
-                          aria-label="Archive chapter"
-                          onClick={() => void confirmArchive()}
-                        >
-                          <Trash2 size={14} />
+                          <Plus size={15} />
+                          Add chapter
                         </button>
                       </div>
-                      <ChapterEditor
-                        key={`${active.id}-${editorGeneration}`}
-                        ref={editor}
-                        chapter={active}
-                        chapters={chapters}
-                        onSaved={onSaved}
-                        onState={setSaved}
-                      />
-                    </>
-                  ) : (
-                    <div className="blank-book">
-                      <BookOpen size={35} />
-                      <h2>A new chapter awaits.</h2>
-                      <p>
-                        Add a chapter to continue shaping your game's design.
-                      </p>
-                      <button
-                        className="primary"
-                        onClick={() => openModal("new-chapter")}
-                      >
-                        <Plus size={15} />
-                        Add chapter
-                      </button>
-                    </div>
+                    )}
+                  </section>
+                  {workshop && active && (
+                    <Workshop
+                      key={active.id}
+                      chapter={active}
+                      project={project}
+                      chapters={chapters}
+                      configured={configured}
+                      flush={flush}
+                      onReviewed={refreshAfterReview}
+                      onSetup={() => setModal("settings")}
+                      onClose={() => setWorkshop(false)}
+                      onOpenKnowledge={(result) => {
+                        if (result.entity === "concept")
+                          void openKnowledge("concepts", result.id);
+                        else if (result.entity === "relationship")
+                          void api<{ sourceConceptId: string }>(
+                            `/projects/${project.id}/relationships/${result.id}`,
+                          )
+                            .then((r) =>
+                              openKnowledge("concepts", r.sourceConceptId),
+                            )
+                            .catch((e) => setError(e.message));
+                        else
+                          void api<{ kind: "decision" | "question" }>(
+                            `/projects/${project.id}/records/${result.id}`,
+                          )
+                            .then((r) =>
+                              openKnowledge(
+                                r.kind === "decision"
+                                  ? "decisions"
+                                  : "questions",
+                                result.id,
+                              ),
+                            )
+                            .catch((e) => setError(e.message));
+                      }}
+                    />
                   )}
-                </section>
-                {workshop && active && (
-                  <Workshop
-                    key={active.id}
-                    chapter={active}
-                    project={project}
-                    chapters={chapters}
-                    configured={configured}
-                    flush={flush}
-                    onReviewed={refreshAfterReview}
-                    onSetup={() => setModal("settings")}
-                    onClose={() => setWorkshop(false)}
-                  />
-                )}
-              </div>
+                </div>
+              )}
             </>
           ) : (
             <div className="home-scroll">
@@ -921,7 +1067,9 @@ export function App() {
           onClose={() => setHistoryChapter(undefined)}
           onRestored={async (c) => {
             await refreshAfterReview();
+            if (c.projectId !== currentProject.current) return;
             setActiveId(c.id);
+            setProjectView("book");
           }}
         />
       )}

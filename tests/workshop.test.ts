@@ -19,7 +19,7 @@ function setup(path = ":memory:") {
 }
 function offer(
   f: ReturnType<typeof setup>,
-  change: Partial<Answer["proposals"][number]>,
+  change: Partial<Exclude<Answer["proposals"][number], { kind: "knowledge" }>>,
 ) {
   const w = f.store.workshop(f.chapter.id),
     m = f.store.addMessage(

@@ -2,6 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { migrateKnowledge } from "./knowledge-migration.js";
+import { migrateKnowledgeProposals } from "./proposal-migration.js";
 
 export function openDatabase(path: string) {
   if (path !== ":memory:")
@@ -91,5 +92,6 @@ export function openDatabase(path: string) {
       COMMIT;`);
   }
   migrateKnowledge(db);
+  migrateKnowledgeProposals(db);
   return db;
 }

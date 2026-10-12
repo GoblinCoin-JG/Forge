@@ -6,6 +6,7 @@ import {
   ChevronDown,
   ChevronRight,
   Plus,
+  Lightbulb,
 } from "lucide-react";
 import type { Chapter, Project } from "../../shared/types";
 import { chapterOutline, isDescendant } from "../../shared/chapter-tree";
@@ -53,6 +54,9 @@ export function DesignBookNav({
   onOpenChapter,
   onAddChapter,
   onReorder,
+  projectView,
+  onOpenBook,
+  onOpenKnowledge,
 }: {
   projects: Project[];
   projectId?: string;
@@ -62,6 +66,9 @@ export function DesignBookNav({
   onOpenChapter: (id: string) => Promise<void>;
   onAddChapter: () => void;
   onReorder: (id: string, direction: number) => Promise<void>;
+  projectView: "book" | "knowledge";
+  onOpenBook: () => void;
+  onOpenKnowledge: () => void;
 }) {
   const [navigation, setNavigation] = useState(readPreferences);
   useEffect(() => {
@@ -148,7 +155,7 @@ export function DesignBookNav({
                 >
                   <div className="book-row">
                     <button
-                      className="design-book-group"
+                      className="nav-disclosure"
                       aria-label={`${bookExpanded ? "Collapse" : "Expand"} ${project.title} Design Book`}
                       aria-expanded={bookExpanded}
                       aria-controls={`book-chapters-${project.id}`}
@@ -167,6 +174,11 @@ export function DesignBookNav({
                       ) : (
                         <ChevronRight size={13} />
                       )}
+                    </button>
+                    <button
+                      className={`feature-nav ${projectView === "book" ? "selected" : ""}`}
+                      onClick={onOpenBook}
+                    >
                       <BookOpen size={15} />
                       <span>Design Book</span>
                     </button>
@@ -206,7 +218,7 @@ export function DesignBookNav({
                         return (
                           <div
                             key={chapter.id}
-                            className={`chapter-nav-row ${depth ? "subchapter" : ""} ${activeId === chapter.id ? "selected" : ""}`}
+                            className={`chapter-nav-row ${depth ? "subchapter" : ""} ${projectView === "book" && activeId === chapter.id ? "selected" : ""}`}
                             style={{ marginLeft: depth * 12 }}
                           >
                             {hasChildren ? (
@@ -236,7 +248,10 @@ export function DesignBookNav({
                             <button
                               className="chapter-nav"
                               aria-current={
-                                activeId === chapter.id ? "page" : undefined
+                                projectView === "book" &&
+                                activeId === chapter.id
+                                  ? "page"
+                                  : undefined
                               }
                               onClick={() => void onOpenChapter(chapter.id)}
                               title={`${number} ${chapter.title}`}
@@ -274,6 +289,13 @@ export function DesignBookNav({
                       </button>
                     )}
                   </div>
+                  <button
+                    className={`feature-nav knowledge-feature ${projectView === "knowledge" ? "selected" : ""}`}
+                    onClick={onOpenKnowledge}
+                  >
+                    <Lightbulb size={15} />
+                    <span>Design Knowledge</span>
+                  </button>
                 </div>
               )}
             </div>

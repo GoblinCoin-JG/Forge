@@ -52,10 +52,13 @@ export function buildContext(
       truncated = true;
       break;
     }
-    const content = m.content.slice(-Math.min(4000, historyBudget));
+    const isCurrent = m === messages[messages.length - 1] && m.role === "user";
+    const content = isCurrent
+      ? m.content
+      : m.content.slice(-Math.min(4000, historyBudget));
     if (content.length < m.content.length) truncated = true;
     recent.unshift({ ...m, content });
-    historyBudget -= content.length;
+    if (!isCurrent) historyBudget -= content.length;
   }
   if (messages.length > recent.length) truncated = true;
   const terms = new Set(
@@ -123,7 +126,73 @@ export function buildContext(
       text: clip(r.text, 1200),
       rationale: clip(r.rationale, 500),
     }));
+  const knowledge = store.knowledge.projectKnowledge(project.id, true);
+  const ranked = knowledge.concepts
+    .filter((c) => !c.archivedAt)
+    .sort(
+      (a, b) =>
+        Number(b.chapterIds.includes(active.id)) * 100 +
+        Number([...terms].some((t) => b.normalizedName.includes(t))) * 10 +
+        Number(b.authoritative) -
+        Number(a.chapterIds.includes(active.id)) * 100 -
+        Number([...terms].some((t) => a.normalizedName.includes(t))) * 10 -
+        Number(a.authoritative),
+    );
+  const selected = new Set(ranked.slice(0, 20).map((c) => c.id));
+  const connected = knowledge.relationships
+    .filter(
+      (r) =>
+        !r.retiredAt &&
+        (selected.has(r.sourceConceptId) || selected.has(r.targetConceptId)),
+    )
+    .slice(0, 30);
+  for (const r of connected) {
+    selected.add(r.sourceConceptId);
+    selected.add(r.targetConceptId);
+  }
+  const concepts = ranked
+    .filter((c) => selected.has(c.id))
+    .slice(0, 40)
+    .map((c) => ({
+      ...c,
+      description: clip(c.description, 1200),
+      sources: [],
+    }));
+  const conceptIds = new Set(concepts.map((c) => c.id));
+  const relationships = connected
+    .filter(
+      (r) =>
+        conceptIds.has(r.sourceConceptId) && conceptIds.has(r.targetConceptId),
+    )
+    .map((r) => ({ ...r, rationale: clip(r.rationale, 500), sources: [] }));
+  const knowledgeRecords = knowledge.records
+    .filter(
+      (r) =>
+        r.relatedChapterIds.includes(active.id) ||
+        r.relatedConceptIds.some((id) => conceptIds.has(id)),
+    )
+    .sort((a, b) => Number(b.authoritative) - Number(a.authoritative))
+    .slice(0, 20)
+    .map((r) => ({
+      ...r,
+      text: clip(r.text, 1200),
+      rationale: clip(r.rationale, 500),
+      resolution: r.resolution && clip(r.resolution, 1000),
+      sources: [],
+    }));
+  if (
+    concepts.length < ranked.length ||
+    relationships.length < knowledge.relationships.length ||
+    knowledgeRecords.length < knowledge.records.length
+  )
+    truncated = true;
   return {
+    knowledge: {
+      projectId: project.id,
+      concepts,
+      relationships,
+      records: knowledgeRecords,
+    },
     lineage: lineage.slice(-8),
     children: all
       .filter((c) => c.parentId === active.id)

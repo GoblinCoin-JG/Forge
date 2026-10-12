@@ -24,6 +24,10 @@ const listQuery = z
 export function registerKnowledgeRoutes(app: FastifyInstance, store: Store) {
   const knowledge = store.knowledge;
   app.get<{ Params: Scope }>(
+    "/api/projects/:projectId/knowledge/sources/:id",
+    async (req) => knowledge.sourceDetail(req.params.projectId, req.params.id),
+  );
+  app.get<{ Params: Scope }>(
     "/api/projects/:projectId/knowledge",
     async (req) =>
       knowledge.projectKnowledge(

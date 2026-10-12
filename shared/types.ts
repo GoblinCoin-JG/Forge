@@ -1,5 +1,9 @@
 import { z } from "zod";
 import type { KnowledgeSource } from "./knowledge.js";
+import type {
+  KnowledgeProposalData,
+  AppliedKnowledge,
+} from "./knowledge-proposals.js";
 
 export const statuses = [
   "Exploring",
@@ -145,6 +149,8 @@ export interface Message {
   createdAt: string;
 }
 export interface Proposal {
+  knowledge?: KnowledgeProposalData | null;
+  appliedResult?: AppliedKnowledge | null;
   id: string;
   conversationId: string;
   messageId: string;
@@ -173,6 +179,7 @@ export const proposalKinds = [
   "change_status",
   "record_decision",
   "record_question",
+  "knowledge",
 ] as const;
 export type ProposalKind = (typeof proposalKinds)[number];
 export const workflows = [
@@ -181,6 +188,7 @@ export const workflows = [
   "challenge",
   "improve",
   "organize",
+  "extract",
 ] as const;
 export type Workflow = (typeof workflows)[number];
 export interface DesignRecord {

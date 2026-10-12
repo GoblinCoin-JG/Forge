@@ -40,6 +40,46 @@ const now = () => new Date().toISOString();
 
 // Domain operations share the existing Store's DB and transaction boundary.
 export class KnowledgeStore {
+  private proposalEvidence: { projectId: string; source: Evidence } | null =
+    null;
+  withAcceptedProposal<T>(proposalId: string, fn: () => T): T {
+    const p = this.db
+      .prepare(
+        "SELECT p.*,c.chapter_id source_chapter FROM proposals p JOIN conversations c ON c.id=p.conversation_id AND c.project_id=p.project_id JOIN messages m ON m.id=p.message_id AND m.conversation_id=c.id AND m.role='assistant' AND m.state='complete' WHERE p.id=? AND p.status='accepted'",
+      )
+      .get(proposalId) as Row | undefined;
+    if (!p || p.kind !== "knowledge" || !p.knowledge_payload)
+      throw new AppError(400, "An accepted knowledge proposal is required");
+    const metadata = JSON.parse(p.knowledge_payload);
+    this.store.chapter(p.source_chapter);
+    if (
+      metadata.sourceChapterId !== p.source_chapter ||
+      !this.db
+        .prepare(
+          "SELECT 1 FROM chapter_revisions WHERE chapter_id=? AND revision=? AND project_id=?",
+        )
+        .get(p.source_chapter, metadata.sourceRevision, p.project_id)
+    )
+      throw new AppError(400, "Invalid proposal source revision");
+    const previous = this.proposalEvidence;
+    this.proposalEvidence = {
+      projectId: p.project_id,
+      source: {
+        kind: "proposal",
+        proposalId: p.id,
+        conversationId: p.conversation_id,
+        messageId: p.message_id,
+        chapterId: p.source_chapter,
+        chapterRevision: metadata.sourceRevision,
+        details: "Explicitly reviewed Workshop knowledge proposal.",
+      },
+    };
+    try {
+      return fn();
+    } finally {
+      this.proposalEvidence = previous;
+    }
+  }
   constructor(private store: Store) {}
   private get db() {
     return this.store.db;
@@ -55,6 +95,11 @@ export class KnowledgeStore {
       );
   }
   private citation(projectId: string, input?: SourceInput): Evidence {
+    if (this.proposalEvidence) {
+      if (this.proposalEvidence.projectId !== projectId || input)
+        throw new AppError(400, "Invalid proposal provenance override");
+      return this.proposalEvidence.source;
+    }
     const source = sourceInput.parse(input ?? { kind: "manual" });
     if (source.kind === "manual")
       return { kind: "manual", details: "Explicit developer operation." };
@@ -170,7 +215,7 @@ export class KnowledgeStore {
         value.id,
         value.revision,
         operation,
-        actor,
+        source.kind === "proposal" ? "proposal" : actor,
         JSON.stringify(snapshot),
         date,
       );
@@ -220,6 +265,66 @@ export class KnowledgeStore {
           .all(r.id) as Row[],
       ),
     }));
+  }
+  sourceDetail(projectId: string, id: string) {
+    this.owned(projectId);
+    const row = this.db
+      .prepare("SELECT * FROM knowledge_sources WHERE id=? AND project_id=?")
+      .get(id, projectId) as Row | undefined;
+    if (!row)
+      throw new AppError(404, "Knowledge source not found in this project");
+    let chapterId = row.chapter_id as string | null;
+    if (!chapterId && row.conversation_id)
+      chapterId = String(
+        this.db
+          .prepare(
+            "SELECT chapter_id FROM conversations WHERE id=? AND project_id=?",
+          )
+          .get(row.conversation_id, projectId)!.chapter_id,
+      );
+    const c = chapterId ? this.store.chapter(chapterId, true) : null;
+    const message = row.message_id
+      ? this.db
+          .prepare("SELECT * FROM messages WHERE id=? AND conversation_id=?")
+          .get(row.message_id, row.conversation_id)
+      : null;
+    const proposal = row.proposal_id
+      ? this.db
+          .prepare(
+            "SELECT title,kind,status,reason FROM proposals WHERE id=? AND project_id=?",
+          )
+          .get(row.proposal_id, projectId)
+      : null;
+    return {
+      source: this.sourcesForRows([row])[0],
+      chapter: c
+        ? { id: c.id, title: c.title, archivedAt: c.archivedAt }
+        : null,
+      chapterRevision:
+        c && row.chapter_revision !== null
+          ? (this.store
+              .history(c.id)
+              .find((h) => h.revision === row.chapter_revision) ?? null)
+          : null,
+      message: message
+        ? {
+            id: String(message.id),
+            conversationId: String(message.conversation_id),
+            role: message.role,
+            content: String(message.content),
+            state: message.state,
+            createdAt: String(message.created_at),
+          }
+        : null,
+      proposal: proposal
+        ? {
+            title: proposal.title,
+            kind: proposal.kind,
+            status: proposal.status,
+            reason: proposal.reason,
+          }
+        : null,
+    };
   }
   private nameAvailable(projectId: string, name: string, exceptId?: string) {
     const row = this.db

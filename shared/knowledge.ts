@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { Maturity, DesignRecord } from "./types.js";
+import type { ChapterRevision, Message } from "./types.js";
 
 export const relationshipTypes = [
   "depends_on",
@@ -171,4 +172,16 @@ export interface ProjectKnowledge {
   concepts: DesignConcept[];
   relationships: DesignRelationship[];
   records: DesignRecord[];
+}
+export interface KnowledgeSourceDetail {
+  source: KnowledgeSource;
+  chapter: { id: string; title: string; archivedAt: string | null } | null;
+  chapterRevision: ChapterRevision | null;
+  message: Message | null;
+  proposal: {
+    title: string;
+    kind: string;
+    status: string;
+    reason: string;
+  } | null;
 }

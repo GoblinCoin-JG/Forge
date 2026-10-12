@@ -24,6 +24,11 @@ import { chapterOutline } from "../../shared/chapter-tree";
 import { lineDiff } from "../../shared/diff";
 import { api, chat } from "../api";
 import { Modal } from "./Modal";
+import { KnowledgeProposalReview } from "./knowledge/KnowledgeProposalReview";
+import type {
+  AppliedKnowledge,
+  ReviewOutcome,
+} from "../../shared/knowledge-proposals";
 
 export function Workshop({
   chapter,
@@ -34,6 +39,7 @@ export function Workshop({
   onReviewed,
   onSetup,
   onClose,
+  onOpenKnowledge,
 }: {
   chapter: Chapter;
   project: Project;
@@ -43,6 +49,7 @@ export function Workshop({
   onReviewed: () => Promise<void>;
   onSetup: () => void;
   onClose: () => void;
+  onOpenKnowledge?: (result: AppliedKnowledge) => void;
 }) {
   const [data, setData] = useState<WorkshopData>(),
     [prompt, setPrompt] = useState(""),
@@ -145,25 +152,51 @@ export function Workshop({
       if (alive.current) setError((e as Error).message);
     }
   };
-  const decide = async (decision: "accept" | "reject") => {
-    if (!review || reviewing) return;
+  const reviewGuard = useRef(false);
+  const decide = async (
+    decision: "accept" | "reject",
+    outcome?: ReviewOutcome,
+  ) => {
+    if (!review || reviewGuard.current) return;
+    reviewGuard.current = true;
     setReviewing(true);
     setError("");
+    let committed = false;
     try {
       if (decision === "accept" && !(await flush()))
         throw new Error("Save your current edits before accepting a proposal.");
-      await api(`/proposals/${review.id}/review`, "POST", {
-        decision,
-        ...(review.kind === "create_chapter" ||
-        review.kind === "create_subchapter"
-          ? { parentId: proposalParent }
-          : {}),
-      });
-      setData(await load());
+      const accepted = await api<Proposal>(
+        `/proposals/${review.id}/review`,
+        "POST",
+        {
+          decision,
+          ...(outcome ? { outcome } : {}),
+          ...(review.kind === "create_chapter" ||
+          review.kind === "create_subchapter"
+            ? { parentId: proposalParent }
+            : {}),
+        },
+      );
+      committed = true;
+      setData((d) =>
+        d
+          ? {
+              ...d,
+              proposals: d.proposals.map((p) =>
+                p.id === accepted.id ? accepted : p,
+              ),
+            }
+          : d,
+      );
       setReview(undefined);
+      setData(await load());
       if (decision === "accept") await onReviewed();
     } catch (e) {
-      setError((e as Error).message);
+      setError(
+        committed
+          ? `Your review was saved, but refreshing failed. Reopen the Workshop to refresh. ${(e as Error).message}`
+          : (e as Error).message,
+      );
       if (review.chapterId) {
         try {
           setReviewTarget(await api<Chapter>(`/chapters/${review.chapterId}`));
@@ -172,6 +205,7 @@ export function Workshop({
         }
       }
     } finally {
+      reviewGuard.current = false;
       setReviewing(false);
     }
   };
@@ -194,6 +228,11 @@ export function Workshop({
     review?.kind === "record_decision" || review?.kind === "record_question";
   const isStatus = review?.kind === "change_status";
   const actions: { mode: Workflow; label: string; prompt: string }[] = [
+    {
+      mode: "extract",
+      label: "Extract Design Knowledge",
+      prompt: `Extract meaningful design knowledge from ${chapter.title} and our conversation. Reuse existing concepts; propose only supported concepts, relationships, decisions or questions for individual review. Do not apply changes.`,
+    },
     {
       mode: "explore",
       label: "Explore this chapter",
@@ -324,10 +363,19 @@ export function Workshop({
               <FilePenLine size={17} />
               <div>
                 <span className="eyebrow">
-                  PROPOSED {p.kind.replaceAll("_", " ").toUpperCase()}
+                  PROPOSED{" "}
+                  {(p.knowledge?.payload.action ?? p.kind)
+                    .replaceAll("_", " ")
+                    .toUpperCase()}
                 </span>
                 <strong>{p.title}</strong>
                 <span>{p.description}</span>
+                {!!p.knowledge?.dependencies.length && (
+                  <span>
+                    Requires{" "}
+                    {p.knowledge.dependencies.map((d) => d.title).join(", ")}
+                  </span>
+                )}
               </div>
               <ChevronRight size={16} />
             </button>
@@ -339,7 +387,15 @@ export function Workshop({
               {p.status === "accepted" ? <Check size={13} /> : <X size={13} />}
               <span>
                 {p.title} · {p.status}
+                {p.appliedResult
+                  ? ` · ${p.appliedResult.outcome === "approve" ? "Approved" : p.appliedResult.outcome === "exploring" ? "Exploring" : "Reviewed"}`
+                  : ""}
               </span>
+              {p.appliedResult && onOpenKnowledge && (
+                <button onClick={() => onOpenKnowledge(p.appliedResult!)}>
+                  Open in Design Knowledge
+                </button>
+              )}
             </div>
           ))}
         {!!data?.records.length && (
@@ -464,7 +520,26 @@ export function Workshop({
           Exploration stays separate from decisions.
         </p>
       </div>
-      {review && (
+      {review?.knowledge && (
+        <KnowledgeProposalReview
+          proposal={review}
+          proposals={data?.proposals ?? []}
+          chapters={chapters}
+          busy={reviewing}
+          error={error}
+          onClose={() => setReview(undefined)}
+          onDecide={(decision, outcome) => void decide(decision, outcome)}
+          onRegenerate={() => {
+            const p = review;
+            setReview(undefined);
+            void send(
+              `Regenerate the knowledge proposal "${p.title}" against current knowledge. Intended change: ${p.description}. Reason: ${p.reason}. Reuse accepted prerequisite concepts and supply current target revisions. Propose the change for review; do not apply it.`,
+              "extract",
+            );
+          }}
+        />
+      )}
+      {review && !review.knowledge && (
         <Modal
           title="Review proposed change"
           wide

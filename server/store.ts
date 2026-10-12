@@ -4,6 +4,8 @@ import { changeSchema, type Answer } from "./ai.js";
 import { randomUUID } from "node:crypto";
 import { sameChapterContent } from "../shared/chapter-content.js";
 import { KnowledgeStore } from "./knowledge-store.js";
+import { KnowledgeProposals } from "./knowledge-proposals.js";
+import type { ReviewOutcome } from "../shared/knowledge-proposals.js";
 import type { DatabaseSync } from "node:sqlite";
 import {
   textDoc,
@@ -62,6 +64,8 @@ const message = (r: Row): Message => ({
   createdAt: r.created_at,
 });
 const proposal = (r: Row): Proposal => ({
+  knowledge: r.knowledge_payload ? JSON.parse(r.knowledge_payload) : null,
+  appliedResult: r.applied_result ? JSON.parse(r.applied_result) : null,
   id: r.id,
   conversationId: r.conversation_id,
   messageId: r.message_id,
@@ -83,9 +87,11 @@ const proposal = (r: Row): Proposal => ({
 });
 
 export class Store {
+  readonly knowledgeProposals: KnowledgeProposals;
   readonly knowledge: KnowledgeStore;
   constructor(public db: DatabaseSync) {
     this.knowledge = new KnowledgeStore(this);
+    this.knowledgeProposals = new KnowledgeProposals(this);
   }
   private inTransaction = false;
   transaction<T>(fn: () => T): T {
@@ -698,6 +704,7 @@ export class Store {
     id: string,
     decision: "accept" | "reject",
     placement?: { parentId: string | null },
+    outcome?: ReviewOutcome,
   ) {
     return this.transaction(() => {
       const row = this.db.prepare("SELECT * FROM proposals WHERE id=?").get(id);
@@ -705,6 +712,26 @@ export class Store {
       const p = proposal(row);
       if (p.status !== "pending")
         throw new AppError(409, "This proposal has already been reviewed.");
+      if (p.kind === "knowledge") {
+        if (placement)
+          throw new AppError(
+            400,
+            "Knowledge proposals cannot choose chapter placement",
+          );
+        if (decision === "accept") this.knowledgeProposals.accept(p, outcome);
+        else
+          this.db
+            .prepare("UPDATE proposals SET status='rejected' WHERE id=?")
+            .run(p.id);
+        return proposal(
+          this.db.prepare("SELECT * FROM proposals WHERE id=?").get(p.id)!,
+        );
+      }
+      if (outcome)
+        throw new AppError(
+          400,
+          "Knowledge outcomes are only valid for knowledge proposals",
+        );
       if (
         placement &&
         p.kind !== "create_chapter" &&
