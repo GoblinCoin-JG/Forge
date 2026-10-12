@@ -11,6 +11,7 @@ import { randomUUID } from "node:crypto";
 import { sameChapterContent } from "../shared/chapter-content.js";
 import { KnowledgeStore } from "./knowledge-store.js";
 import { KnowledgeProposals } from "./knowledge-proposals.js";
+import { ContextStore } from "./context-store.js";
 import type { ReviewOutcome } from "../shared/knowledge-proposals.js";
 import type { DatabaseSync } from "node:sqlite";
 import {
@@ -94,9 +95,11 @@ const proposal = (r: Row): Proposal => ({
 });
 
 export class Store {
+  readonly context: ContextStore;
   readonly knowledgeProposals: KnowledgeProposals;
   readonly knowledge: KnowledgeStore;
   constructor(public db: DatabaseSync) {
+    this.context = new ContextStore(this);
     this.knowledge = new KnowledgeStore(this);
     this.knowledgeProposals = new KnowledgeProposals(this);
   }
@@ -150,7 +153,8 @@ export class Store {
       this.db
         .prepare("INSERT INTO projects VALUES (?,?,?,?,?)")
         .run(id, title || "Untitled game", premise, date, date);
-      this.createChapter(id, "Game Vision", textDoc(premise));
+      const vision = this.createChapter(id, "Game Vision", textDoc(premise));
+      this.context.setAnchor(id, vision.id, "initial-chapter");
     });
     return this.project(id);
   }
@@ -507,7 +511,20 @@ export class Store {
             "SELECT * FROM messages WHERE conversation_id=? ORDER BY rowid",
           )
           .all(id) as Row[]
-      ).map(message),
+      ).map((r) => {
+        const m = message(r);
+        const reference = this.db
+          .prepare(
+            "SELECT request_id FROM workshop_response_contexts WHERE message_id=?",
+          )
+          .get(m.id);
+        return {
+          ...m,
+          context: reference
+            ? { requestId: String(reference.request_id), available: true }
+            : undefined,
+        };
+      }),
       records: this.records(c.projectId).filter((r) =>
         r.relatedChapterIds.includes(chapterId),
       ),

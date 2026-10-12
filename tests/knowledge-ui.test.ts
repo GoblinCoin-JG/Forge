@@ -15,6 +15,168 @@ import {
 } from "./fixtures/rich-document.js";
 import { materializeDocument } from "../shared/document-proposals.js";
 
+test("oversized Workshop instructions stay in the composer and context disclosure can retry a transient read failure", async () => {
+  const f = await uiFixture(true, async () => ({
+    reply: "Context is captured",
+    proposals: [],
+  }));
+  try {
+    await f.click(/^UUI fixture$/);
+    const oversized = "x".repeat(20001);
+    await f.fill("Message the AI Workshop", oversized);
+    await f.click("Send message");
+    assert.match(f.text(), /up to 20,000/);
+    assert.equal(
+      f.dom.window.document.querySelector<HTMLTextAreaElement>(
+        '[aria-label="Message the AI Workshop"]',
+      )!.value,
+      oversized,
+    );
+    assert.equal(f.store.workshop(f.chapter.id).messages.length, 0);
+    await f.fill("Message the AI Workshop", "Explain current design");
+    await f.click("Send message");
+    await f.wait(() => f.text().includes("Context is captured"));
+    const fetch = f.dom.window.fetch ?? globalThis.fetch;
+    let fail = true;
+    const original = globalThis.fetch;
+    globalThis.fetch = async (input, init) => {
+      if (fail && String(input).includes("/context/")) {
+        fail = false;
+        return new Response(
+          JSON.stringify({ error: "Temporary context read failure" }),
+          { status: 503 },
+        );
+      }
+      return original(input, init);
+    };
+    await f.click("Context Used");
+    await f.wait(() => f.text().includes("Temporary context read failure"));
+    await f.click("Retry context");
+    await f.wait(() => f.text().includes("Fully supplied"));
+    assert.doesNotMatch(f.text(), /Temporary context read failure/);
+  } finally {
+    await f.close();
+  }
+});
+
+test("Context Used shows supplied sources and captured rich evidence after later revisions, then navigates to the source chapter", async () => {
+  const f = await uiFixture(true, async () => ({
+    reply: "Extraction already exists in Remote Systems.",
+    proposals: [],
+  }));
+  try {
+    const remote = f.store.createChapter(
+      f.project.id,
+      "Remote Systems",
+      richDesignDocument,
+    );
+    await f.click(/^UUI fixture$/);
+    await f.fill(
+      "Message the AI Workshop",
+      "Explain Extraction from Remote Systems.",
+    );
+    await f.click("Send message");
+    await f.wait(() =>
+      f.text().includes("Extraction already exists in Remote Systems."),
+    );
+    await f.click("Context Used");
+    await f.wait(() => f.text().includes("Information supplied to the AI"));
+    assert.match(f.text(), /does not prove which sources/);
+    await f.wait(() => f.text().includes("Fully supplied"));
+    f.store.updateChapter(remote.id, {
+      revision: remote.revision,
+      content: textDoc("Later source replacement"),
+    });
+    await f.click("Remote Systems");
+    await f.wait(() =>
+      f.text().includes("captured evidence from this request"),
+    );
+    await f.wait(() =>
+      Boolean(
+        f.scope().querySelector('a[href="https://example.com/movement-old"]'),
+      ),
+    );
+    assert.match(f.scope().textContent ?? "", /saved version 0/);
+    assert.doesNotMatch(
+      f.scope().textContent ?? "",
+      /Later source replacement/,
+    );
+    await f.click("Open current chapter");
+    await f.wait(
+      () =>
+        f.dom.window.document.querySelector<HTMLInputElement>(
+          '[aria-label="Chapter title"]',
+        )?.value === "Remote Systems",
+    );
+    assert.match(f.text(), /Later source replacement/);
+  } finally {
+    await f.close();
+  }
+});
+
+test("Project details can safely correct a stable Game Vision association without approving or changing chapter content", async () => {
+  const f = await uiFixture(true);
+  try {
+    const remote = f.store.createChapter(
+      f.project.id,
+      "Direction Notes",
+      textDoc("Unreviewed vision"),
+    );
+    await f.click(/^UUI fixture$/);
+    await f.click("Project details");
+    await f.wait(
+      () =>
+        !(
+          f
+            .scope()
+            .querySelector<HTMLSelectElement>(
+              '[aria-label="Game Vision chapter"]',
+            )?.disabled ?? true
+        ),
+    );
+    await f.select("Game Vision chapter", remote.id);
+    await f.click("Save details");
+    await f.wait(() => !f.dom.window.document.querySelector("dialog[open]"));
+    assert.equal(f.store.context.anchor(f.project.id).chapterId, remote.id);
+    assert.equal(f.store.chapter(remote.id).revision, remote.revision);
+    assert.equal(f.store.chapter(remote.id).status, "Exploring");
+  } finally {
+    await f.close();
+  }
+});
+
+test("older responses disclose missing context and failed responses retain their actual supplied context", async () => {
+  const f = await uiFixture(true, async () => {
+    throw new Error("Provider unavailable");
+  });
+  try {
+    const w = f.store.workshop(f.chapter.id);
+    f.store.addMessage(w.conversationId, "assistant", "Older discussion");
+    await f.click(/^UUI fixture$/);
+    await f.click("Context Used");
+    assert.match(f.text(), /not recorded for this older response/);
+    await f.fill("Message the AI Workshop", "Explain current design");
+    await f.click("Send message");
+    await f.wait(() => f.text().includes("Provider unavailable"));
+    const details = Array.from(
+      f.dom.window.document.querySelectorAll<HTMLDetailsElement>(
+        ".context-used",
+      ),
+    ).at(-1)!;
+    await act(async () => {
+      details.open = true;
+      details.dispatchEvent(new f.dom.window.Event("toggle"));
+    });
+    await f.wait(() => details.textContent!.includes("Fully supplied"));
+    assert.match(
+      details.textContent!,
+      /Recorded context prepared for this AI attempt/,
+    );
+  } finally {
+    await f.close();
+  }
+});
+
 async function uiFixture(fullApp = false, assistant?: DesignAssistant) {
   const dom = new JSDOM(
     '<!doctype html><html><body><div id="root"></div></body></html>',

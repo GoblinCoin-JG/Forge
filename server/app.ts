@@ -70,6 +70,36 @@ export function createApp(
     model: process.env.OPENAI_MODEL || "gpt-4.1-mini",
   }));
   app.get("/api/projects", async () => store.projects());
+  store.context.recoverInterrupted();
+  app.get<{ Params: { id: string } }>(
+    "/api/projects/:id/context-anchor",
+    async (request) => store.context.anchor(request.params.id),
+  );
+  app.patch<{ Params: { id: string } }>(
+    "/api/projects/:id/context-anchor",
+    async (request) => {
+      const input = z
+        .object({ chapterId: z.string().uuid().nullable() })
+        .strict()
+        .parse(request.body);
+      return store.context.setAnchor(request.params.id, input.chapterId);
+    },
+  );
+  app.get<{ Params: { id: string; requestId: string } }>(
+    "/api/projects/:id/context/:requestId",
+    async (request) =>
+      store.context.inspection(request.params.id, request.params.requestId),
+  );
+  app.get<{
+    Params: { id: string; requestId: string };
+    Querystring: { key: string };
+  }>("/api/projects/:id/context/:requestId/source", async (request) =>
+    store.context.source(
+      request.params.id,
+      request.params.requestId,
+      z.string().min(1).max(500).parse(request.query.key),
+    ),
+  );
   app.post("/api/projects", async (request) => {
     const input = projectInput.parse(request.body);
     return store.createProject(input.title, input.premise);
@@ -224,7 +254,11 @@ export function createApp(
         );
       const { content, workflow } = z
         .object({
-          content: z.string().trim().min(1).max(20000),
+          content: z
+            .string()
+            .min(1)
+            .max(20000)
+            .refine((value) => Boolean(value.trim()), "A message is required"),
           workflow: z.enum(workflows).optional(),
         })
         .parse(request.body);
@@ -236,18 +270,40 @@ export function createApp(
           "A Workshop response is already in progress for this project.",
         );
       const workshop = store.workshop(active.id);
-      busy.add(project.id);
       const user = store.addMessage(workshop.conversationId, "user", content);
-      const context = buildContext(
-        store,
-        active.id,
-        [...workshop.messages, user],
-        workflow ?? null,
-      );
+      let context: ReturnType<typeof buildContext>;
+      try {
+        context = buildContext(
+          store,
+          active.id,
+          [...workshop.messages, user],
+          workflow ?? null,
+        );
+      } catch (error) {
+        throw new AppError(
+          422,
+          error instanceof Error
+            ? error.message
+            : "The request context could not be prepared. No instructions were truncated.",
+        );
+      }
       const capturedKnowledge = store.knowledge.projectKnowledge(
         project.id,
         true,
       );
+      const suppliedScope = JSON.parse(
+        context.providerRequest!.contextSerialized,
+      ) as ReturnType<typeof buildContext>;
+      if (
+        suppliedScope.active.id !== active.id ||
+        suppliedScope.active.revision !== active.revision
+      )
+        throw new AppError(
+          409,
+          "The source changed while context was prepared. Retry against the current saved version.",
+        );
+      const requestId = store.context.capture(context, user.id);
+      busy.add(project.id);
       const controller = new AbortController();
       const abort = () => controller.abort();
       reply.raw.on("close", abort);
@@ -279,7 +335,7 @@ export function createApp(
               "The AI proposed a change outside the active chapter. Try again with a focused request.",
             );
         if (
-          context.activeTruncated &&
+          suppliedScope.activeTruncated &&
           result.proposals.some(
             (p) =>
               p.kind === "update_chapter" ||
@@ -314,6 +370,7 @@ export function createApp(
             "assistant",
             result.reply,
           );
+          store.context.attach(requestId, message.id);
           store.knowledgeProposals.addBatch(
             workshop.conversationId,
             message.id,
@@ -331,7 +388,7 @@ export function createApp(
                 p,
                 p.chapterId ? active.revision : null,
                 p.chapterId ? active : undefined,
-                context.documentReceipt,
+                suppliedScope.documentReceipt,
                 active,
               ),
             );
@@ -341,7 +398,7 @@ export function createApp(
         const interrupted =
           controller.signal.aborted ||
           (error instanceof Error && error.name === "AbortError");
-        store.addMessage(
+        const failedMessage = store.addMessage(
           workshop.conversationId,
           "assistant",
           partial ||
@@ -350,6 +407,7 @@ export function createApp(
               : "No response completed. Please try again."),
           interrupted ? "interrupted" : "failed",
         );
+        store.context.attach(requestId, failedMessage.id);
         const safe =
           error instanceof ZodError
             ? "The AI returned an invalid proposal. No Design Book or knowledge changes were made."

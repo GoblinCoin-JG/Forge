@@ -879,7 +879,7 @@ test("mixed invalid AI batches roll back reply and all proposals, and generation
     await app.inject({
       method: "POST",
       url: `/api/chapters/${f.chapter.id}/chat`,
-      payload: { content: "Refine" },
+      payload: { content: "Refine Movement" },
     });
     const p = f.store.workshop(f.chapter.id).proposals[0];
     assert.equal(p.knowledge!.before!.description, "Original");

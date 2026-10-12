@@ -100,6 +100,16 @@ Milestone 5 shares `shared/document.ts` extensions between the live editor, read
 
 Migration 7 adds nullable immutable document metadata and protects canonical proposal content/source fields. Existing chapter snapshots, approvals, knowledge metadata, and legacy proposals are retained. Store acceptance revalidates scope and content and reuses transactional revision/history/provenance checks. Unsafe legacy full replacements require regeneration; safe stored creations and localized edits retain their exact saved content. `DocumentComparison.tsx` displays rich previews with structural, formatting, and link differences. Unsupported saved structures receive a retained-source read-only guard. See [Milestone 5 report](GOAL_3_MILESTONE_5.md) for contracts, acceptance audit, and verification.
 
+## Goal 3 context intelligence
+
+Migration 8 adds a project-owned stable Game Vision association, immutable provider-ready request/context/manifest snapshots, and immutable assistant-response associations. Legacy anchors require unique historical creation evidence; ambiguous/missing anchors stay unassigned. Project details provides explicit correction. Captured requests survive failures, interruption, and restart; orphaned attempts receive a clearly interrupted response exactly once.
+
+`server/context.ts` orchestrates project-scoped retrieval and selection. `context-retrieval.ts` owns bulk normalized knowledge reads, Unicode lexical matching, heading hierarchy/whole-section excerpts, and deterministic bounded graph traversal. Current and recent topics, explicit references, associations, authority, and historical-state requests determine detail selection. Exact approved knowledge snapshots and provenance chapter/message evidence remain separate from live exploration. Category reservations protect chapter details, concept/relationship discovery, questions, recent exchange, and relevant older discussion.
+
+`context-budget.ts` checks configurable UTF-8 byte limits and model context/output headroom against the complete provider JSON body. Recognized encodings use a tokenizer estimate with safety reserves; unknown encodings and adversarial long unbroken text use a conservative byte bound. `provider-format.ts` keeps invariant instructions separate from labeled source data and never independently trims selected sources. The finalized serialized body is persisted before dispatch and transmitted unchanged after digest/equivalence checks. Authorization headers and credentials are excluded from snapshots.
+
+`ContextUsed.tsx` loads project-scoped manifests on demand, shows bounded expandable source/omission lists, distinguishes supplied versus prepared-but-unconfirmed attempts, and inspects exact captured source material with current-source navigation. Existing document V2/knowledge V1 proposals, approval controls, source revisions, and Milestone 5 coverage checks remain intact. See [Milestone 6 completion report](GOAL_3_MILESTONE_6.md).
+
 ## Goal 2 implementation
 
 1. Reused the existing SQLite store, chapter revision checks, SSE adapter, editor flush, and chapter conversations.
@@ -110,6 +120,6 @@ Migration 7 adds nullable immutable document metadata and protects canonical pro
 ## Current limits
 
 - Goal 2 verification uses a deterministic assistant and does not make a live provider call. Provider quality still depends on the configured model.
-- Context uses character budgets and keyword overlap, not a tokenizer or semantic retrieval. Older conversations remain persisted but only recent completed messages are sent. There is no automatic conversation summarization or contradiction classifier; significant unresolved tensions can be proposed as open questions.
+- Context uses deterministic lexical/association/relationship retrieval and serialized byte/token budgets. It does not use embeddings or automatic summaries. Relevant older discussion is selectively retrieved, with explicit authority and source coverage; no automatic contradiction classifier or merge process is introduced.
 - AI document operations use canonical rich JSON validated against the actual editor schema. Whole-block excerpts permit localized operations when the complete target section is supplied; full replacements require complete source coverage. Legacy text conversion is confined to compatibility storage paths; newly generated text document operations are rejected. Opening documents never repairs Markdown automatically. Unsupported historical structures remain retained and disclosed rather than silently normalized.
 - This remains a single-user local application. Concurrent browser edits are detected and rejected rather than merged. A hard crash before an autosave completes can lose unsaved draft text.

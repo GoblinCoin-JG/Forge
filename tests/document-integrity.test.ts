@@ -312,7 +312,7 @@ test("whole-node context retains canonical formatting and rejects incomplete cha
           },
           {
             type: "paragraph",
-            content: [{ type: "text", text: "x".repeat(15000) }],
+            content: [{ type: "text", text: "x".repeat(80000) }],
           },
         ],
       },
@@ -595,7 +595,7 @@ test("provider adapter sends actual rich JSON, recursive strict schema and parse
   try {
     globalThis.fetch = async (_url, input) => {
       const body = JSON.parse(String(input!.body)),
-        system = body.messages[0].content;
+        system = body.messages[1].content;
       assert.ok(system.includes('"type":"orderedList"'));
       assert.ok(system.includes("movement-old"));
       assert.ok(system.includes('"marks"'));
@@ -828,7 +828,7 @@ test("partial canonical context permits a supplied section but rejects full repl
         },
         {
           type: "paragraph",
-          content: [{ type: "text", text: "x".repeat(14000) }],
+          content: [{ type: "text", text: "x".repeat(80000) }],
         },
       ],
     },

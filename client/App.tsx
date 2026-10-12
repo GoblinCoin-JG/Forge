@@ -68,6 +68,30 @@ export function App() {
     [search, setSearch] = useState(""),
     [submitting, setSubmitting] = useState(false);
   const editor = useRef<EditorHandle>(null);
+  const [visionAnchor, setVisionAnchor] = useState<string | null>(),
+    [anchorLoaded, setAnchorLoaded] = useState(false),
+    [anchorChanged, setAnchorChanged] = useState(false);
+  useEffect(() => {
+    if (modal !== "edit-project" || !project) return;
+    let live = true;
+    setAnchorLoaded(false);
+    setAnchorChanged(false);
+    void api<{ chapterId: string | null }>(
+      `/projects/${project.id}/context-anchor`,
+    )
+      .then((v) => {
+        if (live) {
+          setVisionAnchor(v.chapterId);
+          setAnchorLoaded(true);
+        }
+      })
+      .catch((e) => {
+        if (live) setError(e.message);
+      });
+    return () => {
+      live = false;
+    };
+  }, [modal, project?.id]);
   const navigationGeneration = useRef(0);
   const [projectView, setProjectView] = useState<"book" | "knowledge">("book"),
     [selectedConcept, setSelectedConcept] = useState<string>(),
@@ -208,6 +232,15 @@ export function App() {
         await openProject(p);
       }
       if (modal === "edit-project" && project) {
+        if (anchorChanged) {
+          if (!anchorLoaded)
+            throw new Error(
+              "Load the Game Vision association before changing it.",
+            );
+          await api(`/projects/${project.id}/context-anchor`, "PATCH", {
+            chapterId: visionAnchor ?? null,
+          });
+        }
         const p = await api<Project>(`/projects/${project.id}`, "PATCH", {
           title,
           premise,
@@ -589,6 +622,7 @@ export function App() {
                       onReviewed={refreshAfterReview}
                       onSetup={() => setModal("settings")}
                       onClose={() => setWorkshop(false)}
+                      onOpenChapter={(id) => void openChapter(id)}
                       onOpenKnowledge={(result) => {
                         if (result.entity === "concept")
                           void openKnowledge("concepts", result.id);
@@ -890,6 +924,37 @@ export function App() {
                     {modal === "new-project"
                       ? "Your notes become the first words of your Game Vision chapter."
                       : "Editing these notes leaves your chapter content as you wrote it."}
+                  </span>
+                </label>
+              )}
+              {modal === "edit-project" && (
+                <label>
+                  Game Vision chapter
+                  <select
+                    aria-label="Game Vision chapter"
+                    disabled={!anchorLoaded}
+                    value={visionAnchor ?? ""}
+                    onChange={(e) => {
+                      setVisionAnchor(e.target.value || null);
+                      setAnchorChanged(true);
+                    }}
+                  >
+                    <option value="">No association</option>
+                    {visionAnchor &&
+                      !chapters.some((c) => c.id === visionAnchor) && (
+                        <option value={visionAnchor}>
+                          Archived Game Vision (retained association)
+                        </option>
+                      )}
+                    {chapters.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.title}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="field-help">
+                    A stable reference for project context. Renaming the chapter
+                    keeps this association; it does not approve its content.
                   </span>
                 </label>
               )}

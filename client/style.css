@@ -2891,3 +2891,36 @@ button.danger {
   padding: 24px;
   overflow: auto;
 }
+/* Supplied context remains a compact disclosure inside the conversation. */
+.context-used {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.context-used summary {
+  cursor: pointer;
+}
+.context-used p {
+  font-size: 12px;
+}
+.context-source-list {
+  max-height: 340px;
+  overflow: auto;
+  padding-left: 16px;
+}
+.context-source-list li {
+  margin: 12px 0;
+}
+.context-source-list span,
+.context-source-list small {
+  display: block;
+  margin-top: 4px;
+}
+.context-omissions {
+  border-left: 2px solid var(--gold);
+  padding-left: 10px;
+}
+.context-captured-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

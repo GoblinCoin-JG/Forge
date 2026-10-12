@@ -71,13 +71,17 @@ export function documentSections(doc: Doc) {
   const nodes = doc.content ?? [];
   return nodes.flatMap((node, index) => {
     if (node.type !== "heading") return [];
-    const level = Number((node.attrs as { level: number }).level ?? 1);
+    const level = Number(
+      (node.attrs as { level: number } | undefined)?.level ?? 1,
+    );
     let end = index + 1;
     while (
       end < nodes.length &&
       !(
         nodes[end].type === "heading" &&
-        Number((nodes[end].attrs as { level: number }).level ?? 1) <= level
+        Number(
+          (nodes[end].attrs as { level: number } | undefined)?.level ?? 1,
+        ) <= level
       )
     )
       end++;
@@ -104,7 +108,8 @@ export function materializeDocument(
       p.body.some(
         (n) =>
           n.type === "heading" &&
-          Number((n.attrs as { level: number }).level ?? 1) <= p.level,
+          Number((n.attrs as { level: number } | undefined)?.level ?? 1) <=
+            p.level,
       )
     )
       throw new Error(
@@ -132,7 +137,8 @@ export function materializeDocument(
     p.body.some(
       (n) =>
         n.type === "heading" &&
-        Number((n.attrs as { level: number }).level ?? 1) <= section.level,
+        Number((n.attrs as { level: number } | undefined)?.level ?? 1) <=
+          section.level,
     )
   )
     throw new Error(
@@ -275,7 +281,8 @@ export function documentProposalSafety(p: Proposal): {
       .every(
         (n) =>
           n.type !== "heading" ||
-          Number((n.attrs as { level: number }).level ?? 1) > s.level,
+          Number((n.attrs as { level: number } | undefined)?.level ?? 1) >
+            s.level,
       );
   return {
     safe,

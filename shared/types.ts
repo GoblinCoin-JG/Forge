@@ -76,6 +76,7 @@ export interface ChapterRevision {
   approvalOrigin: "migration" | "manual" | "proposal" | null;
 }
 export interface Message {
+  context?: import("./context.js").ContextReference;
   id: string;
   conversationId: string;
   role: "user" | "assistant";

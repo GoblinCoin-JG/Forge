@@ -23,6 +23,7 @@ import {
 import { chapterOutline } from "../../shared/chapter-tree";
 import { documentProposalSafety } from "../../shared/document-proposals";
 import { DocumentComparison } from "./DocumentComparison";
+import { ContextUsed } from "./ContextUsed";
 import { api, chat } from "../api";
 import { Modal } from "./Modal";
 import { KnowledgeProposalReview } from "./knowledge/KnowledgeProposalReview";
@@ -41,6 +42,7 @@ export function Workshop({
   onSetup,
   onClose,
   onOpenKnowledge,
+  onOpenChapter,
 }: {
   chapter: Chapter;
   project: Project;
@@ -51,6 +53,7 @@ export function Workshop({
   onSetup: () => void;
   onClose: () => void;
   onOpenKnowledge?: (result: AppliedKnowledge) => void;
+  onOpenChapter?: (id: string) => void;
 }) {
   const [data, setData] = useState<WorkshopData>(),
     [prompt, setPrompt] = useState(""),
@@ -85,6 +88,12 @@ export function Workshop({
   }, [stream, data?.messages.length]);
   const send = async (text = prompt, workflow?: Workflow) => {
     if (!text.trim() || sending.current || !data) return;
+    if (text.length > 20000) {
+      setError(
+        "Messages support up to 20,000 characters. Shorten this message before sending; your instructions remain in the composer.",
+      );
+      return;
+    }
     sending.current = true;
     setBusy(true);
     setError("");
@@ -342,6 +351,22 @@ export function Workshop({
               <span>{m.state === "complete" ? "" : m.state}</span>
             </div>
             <p>{m.content}</p>
+            {m.role === "assistant" && (
+              <ContextUsed
+                projectId={project.id}
+                reference={m.context}
+                responseState={m.state}
+                onChapter={onOpenChapter}
+                onConcept={(id) =>
+                  onOpenKnowledge?.({
+                    entity: "concept",
+                    id,
+                    revision: 0,
+                    outcome: "exploring",
+                  })
+                }
+              />
+            )}
           </div>
         ))}
         {busy && (

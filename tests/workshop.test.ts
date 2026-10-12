@@ -328,10 +328,17 @@ test("context includes vision, selected chapter, relevant drafts and approved de
       );
     const messages = Array.from({ length: 100 }, () => ({
       ...m,
-      content: "design ".repeat(4000),
+      content: "design ".repeat(2000),
     }));
     const bounded = buildContext(f.store, active.id, messages);
-    assert.ok(JSON.stringify(bounded).length < 50000);
+    assert.ok(
+      bounded.providerRequest!.contextBytes <=
+        bounded.manifest!.limits.contextBytes,
+    );
+    assert.ok(
+      bounded.providerRequest!.requestBytes <=
+        bounded.manifest!.limits.requestBytes,
+    );
     assert.equal(bounded.truncated, true);
     assert.ok(bounded.messages.length <= 20);
   } finally {
@@ -516,7 +523,7 @@ test("excerpted active chapters cannot be replaced from incomplete AI context", 
   const f = setup();
   f.store.updateChapter(f.chapter.id, {
     revision: 0,
-    content: textDoc("Long chapter ".repeat(1000)),
+    content: textDoc("Long chapter ".repeat(10000)),
   });
   const app = createApp(f.store, {
     aiConfigured: true,
@@ -544,7 +551,7 @@ test("excerpted active chapters cannot be replaced from incomplete AI context", 
     });
     assert.match(r.body, /section proposal/);
     assert.equal(f.store.workshop(f.chapter.id).proposals.length, 0);
-    assert.equal(docText(f.store.chapter(f.chapter.id).content).length, 13000);
+    assert.equal(docText(f.store.chapter(f.chapter.id).content).length, 130000);
   } finally {
     await app.close();
     f.db.close();

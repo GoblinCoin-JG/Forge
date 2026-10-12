@@ -1,0 +1,170 @@
+{
+  "measuredAt": "2026-10-12T03:11:55.879Z",
+  "runtime": "v24.19.0",
+  "contextFormat": "forge-chat-context-v1",
+  "notes": "Synthetic in-memory fixtures. Text storage excludes SQLite page/index/WAL overhead. First run can include tokenizer initialization; timings are observations, not a production SLA.",
+  "measurements": [
+    {
+      "name": "small",
+      "chapters": 10,
+      "concepts": 30,
+      "relationships": 60,
+      "messages": 20,
+      "actualConcepts": 32,
+      "actualChapters": 10,
+      "runs": [
+        {
+          "retrievalMs": 467.21,
+          "contextBytes": 123891,
+          "requestBytes": 151332,
+          "inputTokenEstimate": 48357,
+          "tokenMethod": "o200k_base full-request estimate + 15% + 1024 token reserve",
+          "outputHeadroom": 8192,
+          "suppliedSources": 115,
+          "omissionEntries": 44,
+          "expectedRelevantSources": 6,
+          "retrievedExpectedSources": 6,
+          "storedTextBytes": 320272,
+          "immediateExchangeRetained": true
+        },
+        {
+          "retrievalMs": 90.94,
+          "contextBytes": 123876,
+          "requestBytes": 151317,
+          "inputTokenEstimate": 48353,
+          "tokenMethod": "o200k_base full-request estimate + 15% + 1024 token reserve",
+          "outputHeadroom": 8192,
+          "suppliedSources": 115,
+          "omissionEntries": 44,
+          "expectedRelevantSources": 6,
+          "retrievedExpectedSources": 6,
+          "storedTextBytes": 320236,
+          "immediateExchangeRetained": true
+        },
+        {
+          "retrievalMs": 85.64,
+          "contextBytes": 123878,
+          "requestBytes": 151319,
+          "inputTokenEstimate": 48325,
+          "tokenMethod": "o200k_base full-request estimate + 15% + 1024 token reserve",
+          "outputHeadroom": 8192,
+          "suppliedSources": 115,
+          "omissionEntries": 44,
+          "expectedRelevantSources": 6,
+          "retrievedExpectedSources": 6,
+          "storedTextBytes": 320240,
+          "immediateExchangeRetained": true
+        }
+      ],
+      "storageFor1000SimilarRequestsMiB": 305.41
+    },
+    {
+      "name": "medium",
+      "chapters": 100,
+      "concepts": 300,
+      "relationships": 900,
+      "messages": 200,
+      "actualConcepts": 302,
+      "actualChapters": 100,
+      "runs": [
+        {
+          "retrievalMs": 267.92,
+          "contextBytes": 130314,
+          "requestBytes": 158451,
+          "inputTokenEstimate": 50504,
+          "tokenMethod": "o200k_base full-request estimate + 15% + 1024 token reserve",
+          "outputHeadroom": 8192,
+          "suppliedSources": 123,
+          "omissionEntries": 65,
+          "expectedRelevantSources": 6,
+          "retrievedExpectedSources": 6,
+          "storedTextBytes": 339131,
+          "immediateExchangeRetained": true
+        },
+        {
+          "retrievalMs": 119.11,
+          "contextBytes": 130297,
+          "requestBytes": 158434,
+          "inputTokenEstimate": 50524,
+          "tokenMethod": "o200k_base full-request estimate + 15% + 1024 token reserve",
+          "outputHeadroom": 8192,
+          "suppliedSources": 123,
+          "omissionEntries": 65,
+          "expectedRelevantSources": 6,
+          "retrievedExpectedSources": 6,
+          "storedTextBytes": 339092,
+          "immediateExchangeRetained": true
+        },
+        {
+          "retrievalMs": 107.98,
+          "contextBytes": 130295,
+          "requestBytes": 158432,
+          "inputTokenEstimate": 50531,
+          "tokenMethod": "o200k_base full-request estimate + 15% + 1024 token reserve",
+          "outputHeadroom": 8192,
+          "suppliedSources": 123,
+          "omissionEntries": 65,
+          "expectedRelevantSources": 6,
+          "retrievedExpectedSources": 6,
+          "storedTextBytes": 339088,
+          "immediateExchangeRetained": true
+        }
+      ],
+      "storageFor1000SimilarRequestsMiB": 323.39
+    },
+    {
+      "name": "large",
+      "chapters": 300,
+      "concepts": 1500,
+      "relationships": 4500,
+      "messages": 1000,
+      "actualConcepts": 1502,
+      "actualChapters": 300,
+      "runs": [
+        {
+          "retrievalMs": 875.19,
+          "contextBytes": 121915,
+          "requestBytes": 149170,
+          "inputTokenEstimate": 46785,
+          "tokenMethod": "o200k_base full-request estimate + 15% + 1024 token reserve",
+          "outputHeadroom": 8192,
+          "suppliedSources": 116,
+          "omissionEntries": 77,
+          "expectedRelevantSources": 6,
+          "retrievedExpectedSources": 6,
+          "storedTextBytes": 320866,
+          "immediateExchangeRetained": true
+        },
+        {
+          "retrievalMs": 194.12,
+          "contextBytes": 121898,
+          "requestBytes": 149153,
+          "inputTokenEstimate": 46735,
+          "tokenMethod": "o200k_base full-request estimate + 15% + 1024 token reserve",
+          "outputHeadroom": 8192,
+          "suppliedSources": 116,
+          "omissionEntries": 77,
+          "expectedRelevantSources": 6,
+          "retrievedExpectedSources": 6,
+          "storedTextBytes": 320827,
+          "immediateExchangeRetained": true
+        },
+        {
+          "retrievalMs": 157.77,
+          "contextBytes": 121896,
+          "requestBytes": 149151,
+          "inputTokenEstimate": 46701,
+          "tokenMethod": "o200k_base full-request estimate + 15% + 1024 token reserve",
+          "outputHeadroom": 8192,
+          "suppliedSources": 116,
+          "omissionEntries": 77,
+          "expectedRelevantSources": 6,
+          "retrievedExpectedSources": 6,
+          "storedTextBytes": 320823,
+          "immediateExchangeRetained": true
+        }
+      ],
+      "storageFor1000SimilarRequestsMiB": 305.98
+    }
+  ]
+}

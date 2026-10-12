@@ -20,6 +20,7 @@
     "@tiptap/react": "^3.6.0",
     "@tiptap/starter-kit": "^3.6.0",
     "fastify": "^5.6.0",
+    "js-tiktoken": "^1.0.21",
     "lucide-react": "^0.468.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
